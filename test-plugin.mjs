@@ -20,12 +20,21 @@ function makeGraph(nodeById, createdNodes, createdEdges) {
 }
 
 // respond(body, auth) -> response payload; path is the request path.
+//
+// `auth` is read from X-Tgpeek-Token, NOT Authorization. The host bridge strips `authorization`
+// from every plugin request, so a pack that sends the token there ships a credential that is
+// deleted in transit and a gateway that answers 401 forever. Asserting the header the wire
+// actually carries is the only way this stays true.
 function makeNet(respond) {
   return {
     async fetch(url, init) {
       const body = JSON.parse(init.body);
       const path = url.replace(/^https?:\/\/[^/]+/, "");
-      const auth = (init.headers && init.headers.Authorization) || null;
+      const headers = init.headers || {};
+      if (headers.Authorization || headers.authorization) {
+        check("token is NOT sent on Authorization (the bridge strips it)", false);
+      }
+      const auth = headers["X-Tgpeek-Token"] || null;
       return { ok: true, status: 200, async text() { return "{}"; }, async json() { return respond(path, body, auth); } };
     },
   };
@@ -42,7 +51,7 @@ function makeNet(respond) {
     graph: makeGraph({}, createdNodes, createdEdges),
     net: makeNet((path, body, auth) => {
       check("search path=/search", path === "/search");
-      check("search auth header", auth === "Bearer tok");
+      check("search auth header (X-Tgpeek-Token)", auth === "tok");
       check("search query passed", body.query === "python");
       check("search limit passed", body.limit === 10);
       return {

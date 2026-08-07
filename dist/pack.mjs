@@ -18,6 +18,7 @@
 //   are participant_of / admin_of. Never introduce "member".
 
 const GATEWAY_DEFAULT = "http://127.0.0.1:8787";
+const TOKEN_HEADER = "X-Tgpeek-Token";
 
 // ---- Telegram URL patterns -------------------------------------------------
 const TG_JOIN_RE = /^(?:https?:\/\/)?(?:t|telegram)\.(?:me|dog)\/(?:joinchat\/|\+)[A-Za-z0-9_-]+(?:[?&#].*)?$/i;
@@ -103,10 +104,19 @@ function peerData(ref) {
 // ---- gateway plumbing ------------------------------------------------------
 function gateway(ctx) {
   const config = ctx.config || {};
-  const base = String(config.gateway_url || GATEWAY_DEFAULT).replace(/\/+$/, "");
+  // No gateway_url override: the manifest pins the origin, `endpointCovers` compares it as a
+  // parsed origin (port included), and the install gate shows the analyst that exact endpoint.
+  // A settable base would be denied by the allowlist on every request — a knob that cannot do
+  // anything is worse than no knob. A different port needs a manifest change, i.e. a new version.
+  const base = GATEWAY_DEFAULT;
   const token = config.gateway_token ? String(config.gateway_token) : null;
   const headers = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // NOT `Authorization: Bearer` — the host bridge strips `authorization` (and `cookie`) from
+  // every plugin request by construction, so a plugin can never forward the analyst's
+  // credentials to a third party. That rule is right and the gateway is the odd one out, so
+  // tgpeek accepts the same token on X-Tgpeek-Token as well (gateway/server.py TOKEN_HEADER).
+  // Sending Bearer here is not "belt and braces", it is a header that silently disappears.
+  if (token) headers[TOKEN_HEADER] = token;
   const limits = {};
   if (config.posts_limit != null) limits.limit = Number(config.posts_limit);
   if (config.participants_limit != null) limits.participants_limit = Number(config.participants_limit);
@@ -230,7 +240,7 @@ const searchPlugin = {
     identifier: "run.vineyard.plugins.telegram_search",
     content_type: "vineyard:plugin",
     name: "Telegram Search",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
       "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
     icon: "search",
@@ -264,8 +274,7 @@ const searchPlugin = {
         },
       ],
       config: [
-        { key: "gateway_url", type: "url", label: "tgpeek gateway base URL", optional: true },
-        { key: "gateway_token", type: "string", label: "tgpeek gateway bearer token", secret: true, optional: true },
+        { key: "gateway_token", type: "string", label: "tgpeek gateway token (sent as X-Tgpeek-Token)", secret: true, optional: true },
       ],
     },
     lifecycle: { persistence: "opt-in", controls: ["progress", "cancel"], progress: "determinate" },
@@ -306,7 +315,7 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
       "For each selected web.url node that is a t.me handle link (t.me/<username>), resolves the chat/user via the tgpeek gateway and creates the telegram.user / telegram.channel / telegram.group node with its full profile (bio/about, participant count, flags) and a links-to evidence edge from the source URL. Invite links and non-Telegram URLs are a no-op.",
     icon: "user-search",
@@ -332,8 +341,7 @@ const resolvePlugin = {
         },
       ],
       config: [
-        { key: "gateway_url", type: "url", label: "tgpeek gateway base URL", optional: true },
-        { key: "gateway_token", type: "string", label: "tgpeek gateway bearer token", secret: true, optional: true },
+        { key: "gateway_token", type: "string", label: "tgpeek gateway token (sent as X-Tgpeek-Token)", secret: true, optional: true },
       ],
     },
     lifecycle: { persistence: "opt-in", controls: ["progress", "cancel"], progress: "determinate" },
@@ -381,7 +389,7 @@ const inviteLinkPlugin = {
     identifier: "run.vineyard.plugins.telegram_invite_link",
     content_type: "vineyard:plugin",
     name: "Telegram Invite Link",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
       "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). With params.collect_mode=true the plugin also stages posts (+participants for groups) read without joining. Handle links and non-Telegram URLs are a no-op.",
     icon: "link",
@@ -418,8 +426,7 @@ const inviteLinkPlugin = {
         },
       ],
       config: [
-        { key: "gateway_url", type: "url", label: "tgpeek gateway base URL", optional: true },
-        { key: "gateway_token", type: "string", label: "tgpeek gateway bearer token", secret: true, optional: true },
+        { key: "gateway_token", type: "string", label: "tgpeek gateway token (sent as X-Tgpeek-Token)", secret: true, optional: true },
         { key: "posts_limit", type: "number", label: "Max posts to collect per chat (blank = all)", optional: true },
         { key: "participants_limit", type: "number", label: "Max participants to collect per group (blank = all)", optional: true },
       ],
@@ -477,7 +484,7 @@ const postsPlugin = {
     identifier: "run.vineyard.plugins.telegram_posts",
     content_type: "vineyard:plugin",
     name: "Telegram Posts",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
       "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
     icon: "list",
@@ -507,8 +514,7 @@ const postsPlugin = {
         },
       ],
       config: [
-        { key: "gateway_url", type: "url", label: "tgpeek gateway base URL", optional: true },
-        { key: "gateway_token", type: "string", label: "tgpeek gateway bearer token", secret: true, optional: true },
+        { key: "gateway_token", type: "string", label: "tgpeek gateway token (sent as X-Tgpeek-Token)", secret: true, optional: true },
         { key: "posts_limit", type: "number", label: "Max posts to collect per chat (blank = all)", optional: true },
         { key: "participants_limit", type: "number", label: "Max participants to collect per group (blank = all)", optional: true },
       ],
@@ -574,7 +580,7 @@ const participantsPlugin = {
     identifier: "run.vineyard.plugins.telegram_participants",
     content_type: "vineyard:plugin",
     name: "Telegram Participants",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
       "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
     icon: "users",
@@ -596,8 +602,7 @@ const participantsPlugin = {
         },
       ],
       config: [
-        { key: "gateway_url", type: "url", label: "tgpeek gateway base URL", optional: true },
-        { key: "gateway_token", type: "string", label: "tgpeek gateway bearer token", secret: true, optional: true },
+        { key: "gateway_token", type: "string", label: "tgpeek gateway token (sent as X-Tgpeek-Token)", secret: true, optional: true },
         { key: "posts_limit", type: "number", label: "Max posts to collect per chat (blank = all)", optional: true },
         { key: "participants_limit", type: "number", label: "Max participants to collect per group (blank = all)", optional: true },
       ],
@@ -647,7 +652,7 @@ const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
   content_type: "vineyard:pluginpack",
   name: "Telegram",
-  version: "1.0.0",
+  version: "1.1.0",
   description:
     "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, and granular post / participant collection. The five plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest],
