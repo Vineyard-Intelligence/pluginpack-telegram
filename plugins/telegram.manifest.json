@@ -1,0 +1,271 @@
+{
+  "identifier": "run.vineyard.pluginpacks.telegram",
+  "content_type": "vineyard:pluginpack",
+  "name": "Telegram",
+  "version": "1.0.0",
+  "description": "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, and granular post / participant collection. The five plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
+  "author": {
+    "name": "vineyard-run",
+    "url": "https://github.com/vineyard-run"
+  },
+  "license": "Apache-2.0",
+  "icon": "send",
+  "platforms": {
+    "primary": "web",
+    "web": {
+      "runtime": "sandbox-js",
+      "entry": "dist/pack.mjs"
+    }
+  },
+  "distribution": {
+    "kind": "git",
+    "repository": "https://github.com/Vineyard-Intelligence/pluginpack-telegram",
+    "ref": "v1.0.0",
+    "path": "plugins/telegram.manifest.json"
+  },
+  "plugins": [
+    {
+      "identifier": "run.vineyard.plugins.telegram_search",
+      "content_type": "vineyard:plugin",
+      "name": "Telegram Search",
+      "version": "1.0.0",
+      "description": "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
+      "icon": "search",
+      "platforms": {
+        "primary": "web",
+        "web": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs"
+        }
+      },
+      "io": {
+        "consumes": [],
+        "produces": [
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "user" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "channel" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "group" }
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "minLength": 1, "description": "Search keyword (people, bots, groups, channels)." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "Max results (default 20)." }
+        },
+        "required": ["query"]
+      },
+      "scopes": {
+        "graph": ["node:read", "node:create"],
+        "network": [
+          {
+            "endpoint": "http://127.0.0.1:8787",
+            "methods": ["POST"],
+            "purpose": "tgpeek gateway: global Telegram search. The gateway origin must also be allowlisted in frontend net-allowlist.ts."
+          }
+        ],
+        "config": [
+          { "key": "gateway_url", "type": "url", "label": "tgpeek gateway base URL", "optional": true },
+          { "key": "gateway_token", "type": "string", "label": "tgpeek gateway bearer token", "secret": true, "optional": true }
+        ]
+      },
+      "lifecycle": {
+        "persistence": "opt-in",
+        "controls": ["progress", "cancel"],
+        "progress": "determinate"
+      }
+    },
+    {
+      "identifier": "run.vineyard.plugins.telegram_resolve",
+      "content_type": "vineyard:plugin",
+      "name": "Telegram Resolve",
+      "version": "1.0.0",
+      "description": "For each selected web.url node that is a t.me handle link (t.me/<username>), resolves the chat/user via the tgpeek gateway and creates the telegram.user / telegram.channel / telegram.group node with its full profile (bio/about, participant count, flags) and a links-to evidence edge from the source URL. Invite links and non-Telegram URLs are a no-op.",
+      "icon": "user-search",
+      "platforms": {
+        "primary": "web",
+        "web": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs"
+        }
+      },
+      "io": {
+        "consumes": [
+          { "typepack": "run.vineyard.typepacks.infrastructure", "category": "web", "name": "url" }
+        ],
+        "produces": [
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "user" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "channel" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "group" }
+        ]
+      },
+      "scopes": {
+        "graph": ["node:read", "node:create", "edge:create"],
+        "network": [
+          {
+            "endpoint": "http://127.0.0.1:8787",
+            "methods": ["POST"],
+            "purpose": "tgpeek gateway: resolve a Telegram handle. The gateway origin must also be allowlisted in frontend net-allowlist.ts."
+          }
+        ],
+        "config": [
+          { "key": "gateway_url", "type": "url", "label": "tgpeek gateway base URL", "optional": true },
+          { "key": "gateway_token", "type": "string", "label": "tgpeek gateway bearer token", "secret": true, "optional": true }
+        ]
+      },
+      "lifecycle": {
+        "persistence": "opt-in",
+        "controls": ["progress", "cancel"],
+        "progress": "determinate"
+      }
+    },
+    {
+      "identifier": "run.vineyard.plugins.telegram_invite_link",
+      "content_type": "vineyard:plugin",
+      "name": "Telegram Invite Link",
+      "version": "1.0.0",
+      "description": "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). With params.collect_mode=true the plugin also stages posts (+participants for groups) read without joining. Handle links and non-Telegram URLs are a no-op.",
+      "icon": "link",
+      "platforms": {
+        "primary": "web",
+        "web": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs"
+        }
+      },
+      "io": {
+        "consumes": [
+          { "typepack": "run.vineyard.typepacks.infrastructure", "category": "web", "name": "url" }
+        ],
+        "produces": [
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "user" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "channel" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "group" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "post" }
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "collect_mode": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also collect posts (+participants for groups) when the server grants a peek."
+          }
+        }
+      },
+      "scopes": {
+        "graph": ["node:read", "node:create", "edge:create"],
+        "network": [
+          {
+            "endpoint": "http://127.0.0.1:8787",
+            "methods": ["POST"],
+            "purpose": "tgpeek gateway: invite-link analysis / no-join collection. The gateway origin must also be allowlisted in frontend net-allowlist.ts."
+          }
+        ],
+        "config": [
+          { "key": "gateway_url", "type": "url", "label": "tgpeek gateway base URL", "optional": true },
+          { "key": "gateway_token", "type": "string", "label": "tgpeek gateway bearer token", "secret": true, "optional": true },
+          { "key": "posts_limit", "type": "number", "label": "Max posts to collect per chat (blank = all)", "optional": true },
+          { "key": "participants_limit", "type": "number", "label": "Max participants to collect per group (blank = all)", "optional": true }
+        ]
+      },
+      "lifecycle": {
+        "persistence": "opt-in",
+        "controls": ["progress", "cancel"],
+        "progress": "determinate"
+      }
+    },
+    {
+      "identifier": "run.vineyard.plugins.telegram_posts",
+      "content_type": "vineyard:plugin",
+      "name": "Telegram Posts",
+      "version": "1.0.0",
+      "description": "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
+      "icon": "list",
+      "platforms": {
+        "primary": "web",
+        "web": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs"
+        }
+      },
+      "io": {
+        "consumes": [
+          { "typepack": "run.vineyard.typepacks.infrastructure", "category": "web", "name": "url" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "channel" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "group" }
+        ],
+        "produces": [
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "channel" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "group" },
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "post" }
+        ]
+      },
+      "scopes": {
+        "graph": ["node:read", "node:create", "edge:create"],
+        "network": [
+          {
+            "endpoint": "http://127.0.0.1:8787",
+            "methods": ["POST"],
+            "purpose": "tgpeek gateway: no-join post list. The gateway origin must also be allowlisted in frontend net-allowlist.ts."
+          }
+        ],
+        "config": [
+          { "key": "gateway_url", "type": "url", "label": "tgpeek gateway base URL", "optional": true },
+          { "key": "gateway_token", "type": "string", "label": "tgpeek gateway bearer token", "secret": true, "optional": true },
+          { "key": "posts_limit", "type": "number", "label": "Max posts to collect per chat (blank = all)", "optional": true },
+          { "key": "participants_limit", "type": "number", "label": "Max participants to collect per group (blank = all)", "optional": true }
+        ]
+      },
+      "lifecycle": {
+        "persistence": "opt-in",
+        "controls": ["progress", "cancel"],
+        "progress": "determinate"
+      }
+    },
+    {
+      "identifier": "run.vineyard.plugins.telegram_participants",
+      "content_type": "vineyard:plugin",
+      "name": "Telegram Participants",
+      "version": "1.0.0",
+      "description": "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
+      "icon": "users",
+      "platforms": {
+        "primary": "web",
+        "web": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs"
+        }
+      },
+      "io": {
+        "consumes": [
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "group" }
+        ],
+        "produces": [
+          { "typepack": "run.vineyard.typepacks.telegram", "category": "telegram", "name": "user" }
+        ]
+      },
+      "scopes": {
+        "graph": ["node:read", "node:create", "edge:create"],
+        "network": [
+          {
+            "endpoint": "http://127.0.0.1:8787",
+            "methods": ["POST"],
+            "purpose": "tgpeek gateway: no-join participant list. The gateway origin must also be allowlisted in frontend net-allowlist.ts."
+          }
+        ],
+        "config": [
+          { "key": "gateway_url", "type": "url", "label": "tgpeek gateway base URL", "optional": true },
+          { "key": "gateway_token", "type": "string", "label": "tgpeek gateway bearer token", "secret": true, "optional": true },
+          { "key": "posts_limit", "type": "number", "label": "Max posts to collect per chat (blank = all)", "optional": true },
+          { "key": "participants_limit", "type": "number", "label": "Max participants to collect per group (blank = all)", "optional": true }
+        ]
+      },
+      "lifecycle": {
+        "persistence": "opt-in",
+        "controls": ["progress", "cancel"],
+        "progress": "determinate"
+      }
+    }
+  ]
+}
