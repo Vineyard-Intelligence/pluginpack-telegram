@@ -12,12 +12,19 @@
 // - Graph writes go through the staging store (capture:true at runtime) and are
 //   applied by the analyst after review. This pack never writes outside staging.
 // - Non-Telegram inputs are a strict no-op: nothing is created or modified.
-// - ctx.net.fetch is limited to the manifest network endpoint (the gateway
-//   origin must also be allowlisted in frontend net-allowlist.ts).
+// - ctx.net.fetch is limited to the manifest network endpoint. There is no
+//   second host list to keep in sync — the manifest IS the allowlist.
 // - Terminology: Telegram's canonical term is "participant" — the graph edges
 //   are participant_of / admin_of. Never introduce "member".
 
-const GATEWAY_DEFAULT = "http://127.0.0.1:8787";
+// The tgpeek gateway, mounted under /telegram on Vineyard's auxiliary server.
+//
+// NO TRAILING SLASH: request paths are concatenated onto this ("/search" -> ".../telegram/search"),
+// and a trailing slash here produces "//search". The manifest endpoint is the same string, and
+// `endpointCovers` treats it as a path prefix on a SEGMENT boundary — so this permits
+// /telegram/search but not /telegramX/... and not a sibling mount on the same host, which is what
+// keeps one auxiliary origin from becoming a blanket grant as more services move onto it.
+const GATEWAY_DEFAULT = "https://auxiliary.vineyard.run/telegram";
 const TOKEN_HEADER = "X-Tgpeek-Token";
 
 // ---- Telegram URL patterns -------------------------------------------------
@@ -131,10 +138,10 @@ function peerData(ref) {
 // ---- gateway plumbing ------------------------------------------------------
 function gateway(ctx) {
   const config = ctx.config || {};
-  // No gateway_url override: the manifest pins the origin, `endpointCovers` compares it as a
-  // parsed origin (port included), and the install gate shows the analyst that exact endpoint.
+  // No gateway_url override: the manifest pins the address, `endpointCovers` compares it as a
+  // parsed origin plus a path prefix, and the install gate shows the analyst that exact endpoint.
   // A settable base would be denied by the allowlist on every request — a knob that cannot do
-  // anything is worse than no knob. A different port needs a manifest change, i.e. a new version.
+  // anything is worse than no knob. Moving the gateway means a manifest change, i.e. a new version.
   const base = GATEWAY_DEFAULT;
   const token = config.gateway_token ? String(config.gateway_token) : null;
   const headers = { "Content-Type": "application/json" };
@@ -257,7 +264,7 @@ const searchPlugin = {
     identifier: "run.vineyard.plugins.telegram_search",
     content_type: "vineyard:plugin",
     name: "Telegram Search",
-    version: "1.5.0",
+    version: "1.6.0",
     description:
       "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
     icon: "search",
@@ -285,9 +292,9 @@ const searchPlugin = {
       graph: ["node:read", "node:create"],
       network: [
         {
-          endpoint: "http://127.0.0.1:8787",
+          endpoint: "https://auxiliary.vineyard.run/telegram",
           methods: ["POST"],
-          purpose: "tgpeek gateway: global Telegram search. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+          purpose: "tgpeek gateway: global Telegram search. Mounted under /telegram on the auxiliary server; the manifest endpoint is the allowlist.",
         },
       ],
       config: [
@@ -332,7 +339,7 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    version: "1.5.0",
+    version: "1.6.0",
     description:
       "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
     icon: "user-search",
@@ -358,9 +365,9 @@ const resolvePlugin = {
       graph: ["node:read", "node:create", "node:update", "edge:create"],
       network: [
         {
-          endpoint: "http://127.0.0.1:8787",
+          endpoint: "https://auxiliary.vineyard.run/telegram",
           methods: ["POST"],
-          purpose: "tgpeek gateway: resolve a Telegram handle. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+          purpose: "tgpeek gateway: resolve a Telegram handle. Mounted under /telegram on the auxiliary server; the manifest endpoint is the allowlist.",
         },
       ],
       config: [
@@ -449,7 +456,7 @@ const inviteLinkPlugin = {
     identifier: "run.vineyard.plugins.telegram_invite_link",
     content_type: "vineyard:plugin",
     name: "Telegram Invite Link",
-    version: "1.5.0",
+    version: "1.6.0",
     description:
       "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). Handle links and non-Telegram URLs are a no-op. Analysis only — reading posts of an invite link is Telegram Posts' job (best-effort peek).",
     icon: "link",
@@ -468,9 +475,9 @@ const inviteLinkPlugin = {
       graph: ["node:read", "node:create", "edge:create"],
       network: [
         {
-          endpoint: "http://127.0.0.1:8787",
+          endpoint: "https://auxiliary.vineyard.run/telegram",
           methods: ["POST"],
-          purpose: "tgpeek gateway: invite-link analysis. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+          purpose: "tgpeek gateway: invite-link analysis. Mounted under /telegram on the auxiliary server; the manifest endpoint is the allowlist.",
         },
       ],
       config: [
@@ -522,7 +529,7 @@ const postsPlugin = {
     identifier: "run.vineyard.plugins.telegram_posts",
     content_type: "vineyard:plugin",
     name: "Telegram Posts",
-    version: "1.5.0",
+    version: "1.6.0",
     description:
       "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
     icon: "list",
@@ -546,9 +553,9 @@ const postsPlugin = {
       graph: ["node:read", "node:create", "edge:create"],
       network: [
         {
-          endpoint: "http://127.0.0.1:8787",
+          endpoint: "https://auxiliary.vineyard.run/telegram",
           methods: ["POST"],
-          purpose: "tgpeek gateway: no-join post list. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+          purpose: "tgpeek gateway: no-join post list. Mounted under /telegram on the auxiliary server; the manifest endpoint is the allowlist.",
         },
       ],
       config: [
@@ -618,7 +625,7 @@ const participantsPlugin = {
     identifier: "run.vineyard.plugins.telegram_participants",
     content_type: "vineyard:plugin",
     name: "Telegram Participants",
-    version: "1.5.0",
+    version: "1.6.0",
     description:
       "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
     icon: "users",
@@ -634,9 +641,9 @@ const participantsPlugin = {
       graph: ["node:read", "node:create", "edge:create"],
       network: [
         {
-          endpoint: "http://127.0.0.1:8787",
+          endpoint: "https://auxiliary.vineyard.run/telegram",
           methods: ["POST"],
-          purpose: "tgpeek gateway: no-join participant list. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+          purpose: "tgpeek gateway: no-join participant list. Mounted under /telegram on the auxiliary server; the manifest endpoint is the allowlist.",
         },
       ],
       config: [
@@ -691,7 +698,7 @@ const phoneLookupPlugin = {
     identifier: "run.vineyard.plugins.telegram_phone_lookup",
     content_type: "vineyard:plugin",
     name: "Telegram Phone Lookup",
-    version: "1.5.0",
+    version: "1.6.0",
     description:
       "For each selected identity.phone_number node, resolves the number via the tgpeek gateway (contacts.resolvePhone — the same method t.me/+<number> deep links use) and creates the telegram.user node when the number has a Telegram account whose privacy settings allow phone lookup, plus a same-as edge from the user to the phone number node. Numbers with no account, or hidden from phone lookup, produce nothing. The gateway enforces Telegram's 3-second debounce and caches results for 1 hour.",
     icon: "phone",
@@ -707,9 +714,9 @@ const phoneLookupPlugin = {
       graph: ["node:read", "node:create", "edge:create"],
       network: [
         {
-          endpoint: "http://127.0.0.1:8787",
+          endpoint: "https://auxiliary.vineyard.run/telegram",
           methods: ["POST"],
-          purpose: "tgpeek gateway: resolve a phone number to its Telegram user. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+          purpose: "tgpeek gateway: resolve a phone number to its Telegram user. Mounted under /telegram on the auxiliary server; the manifest endpoint is the allowlist.",
         },
       ],
       config: [
@@ -768,7 +775,7 @@ const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
   content_type: "vineyard:pluginpack",
   name: "Telegram",
-  version: "1.5.0",
+  version: "1.6.0",
   description:
     "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
