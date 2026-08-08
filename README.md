@@ -56,42 +56,62 @@ Vineyard의 **Run plugins 다이얼로그 → 각 플러그인의 Settings**에�
 **tgpeek 게이트웨이를 이 변경 이후 버전으로 올려야 합니다.** 이전 버전은 `Authorization`만
 받으므로 브라우저 경로가 전부 401입니다.
 
+### 게이트웨이 주소: `https://auxiliary.vineyard.run/telegram`
+
+Vineyard 운영 보조 서버의 `/telegram` 마운트로 고정입니다. 팩은 여기에 경로를 이어붙여
+`.../telegram/search`, `.../telegram/phone-lookup` 처럼 호출합니다.
+
+**경로 프리픽스가 실제로 일을 합니다.** `endpointCovers`는 오리진 + **세그먼트 경계** 기준 경로
+프리픽스로 비교하므로, 이 선언은 `/telegram/*`만 허용하고 `/telegramX/...`나 같은 호스트의 다른
+마운트(`/shodan/`, `/whois/` 등 나중에 붙을 것들)로는 새지 않습니다. auxiliary 서버에 서비스가
+늘어나도 **오리진 하나를 통째로 열어주는 일이 없도록** 하는 부분이라, 새 서비스를 추가할 때도
+오리진이 아니라 마운트 경로까지 선언하십시오.
+
+`GATEWAY_DEFAULT`에 **후행 슬래시를 넣지 마십시오** — 요청 경로를 문자열로 이어붙이므로
+`//search`가 됩니다. 매니페스트 엔드포인트도 같은 문자열이어야 하고, `test-plugin.mjs`가
+"팩이 만든 URL이 고정 주소로 시작하는가"를 매 요청마다 검사합니다.
+
 ### `gateway_url`은 없습니다 (의도적)
 
-게이트웨이 오리진은 매니페스트가 `http://127.0.0.1:8787`로 고정하고, `endpointCovers`는 포트까지
-포함한 파싱된 오리진으로 비교하며, 설치 게이트가 분석가에게 보여주는 것도 바로 그 엔드포인트입니다.
 설정 가능한 base URL은 매니페스트만으로는 동작할 수 없습니다 — allowlist 검사(프론트엔드)와
 CORS 워이버(데스크탑 셸)가 서로 다른 게이트라, 사용자가 CORS를 등록해도 allowlist가 여전히 거부하고,
 뚫으려면 `scopes.network` 문법 자체를 확장해야 합니다. **팩 하나 때문에 15개 팩이 공유하는 published
 스키마를 늘릴 이유는 없습니다** (다른 팩은 전부 공개·고정 호스트를 씁니다).
 
-게이트웨이는 Vineyard 전용 서비스이므로 **기본 포트 8787, `127.0.0.1`에 띄우십시오.**
-다른 주소가 필요해지면 그때 `scopes.network` 문법 확장(스키마 + SPEC + registry 선배포)까지
-묶어서 처리하는 게 순서입니다.
+주소를 옮기려면 여섯 플러그인의 `scopes.network[0].endpoint`와 `GATEWAY_DEFAULT`를 함께 고치고
+재발행합니다 — 즉 새 버전입니다.
 
-## 배포 전 필수 (웹 빌드)
+## 서버 쪽 요구사항
 
 플러그인 `ctx.net.fetch`는 매니페스트 `scopes.network`에 선언된 엔드포인트만 통과합니다
 (`plugins/net-allowlist.ts`의 `endpointCovers`가 파싱된 오리진 + 경로 세그먼트 경계로 비교).
-별도의 하드코딩된 호스트 목록은 없습니다 — 매니페스트가 곧 allowlist입니다.
+별도의 하드코딩된 호스트 목록은 없습니다 — **매니페스트가 곧 allowlist**이고, `net-allowlist.ts`에
+호스트를 추가할 필요도 없습니다.
 
-또한 https 페이지에서 루프백(`http://127.0.0.1`)으로 가는 요청은 Chrome의 Private Network
-Access 검사를 받습니다. 게이트웨이는 프리플라이트에 `Access-Control-Allow-Private-Network: true`를
-답하므로 통과하지만, 이 역시 위의 tgpeek 최신 버전이 필요합니다.
-
-별도로 `net-allowlist.ts`에 호스트를 추가할 필요는 없습니다 — 매니페스트가 곧 allowlist입니다.
-게이트웨이 주소를 바꾸려면 여섯 플러그인의 `scopes.network[0].endpoint`를 모두 고치고 재발행해야 합니다
-(위 `gateway_url` 절 참조).
-
+`auxiliary.vineyard.run`이 `/telegram/*`를 tgpeek 게이트웨이로 리버스 프록시하면 됩니다
+(프리픽스를 벗겨서 전달 — 게이트웨이 자체는 `/search`, `/phone-lookup` 처럼 루트에서 서빙).
 게이트웨이는 `tgpeek serve --token <TGPEEK_GATEWAY_TOKEN>`로 실행합니다
 (세션은 사전에 `tgpeek login`으로 생성; 게이트웨이 자체는 재로그인하지 않음).
+
+프록시/게이트웨이가 응답해야 하는 것:
+
+- **CORS** — `Access-Control-Allow-Origin`(앱 오리진), `Access-Control-Allow-Headers`에
+  `Content-Type, X-Tgpeek-Token`, 그리고 `OPTIONS` 프리플라이트. tgpeek 게이트웨이는 이미 보냅니다.
+- **HTTPS** — 앱이 https이므로 http 엔드포인트는 mixed content로 차단됩니다.
+
+루프백을 쓰던 시절 필요했던 Chrome의 Private Network Access 처리
+(`Access-Control-Allow-Private-Network`)는 **더 이상 해당 없습니다** — 공개 https 오리진끼리의
+요청이라 PNA 검사 대상이 아닙니다. 게이트웨이가 그 헤더를 계속 보내도 무해합니다.
+
+덤으로, 공개 https 엔드포인트가 되면서 **웹 빌드에서도 동작합니다** — 루프백 주소는 배포된 웹
+앱에서 사실상 쓸 수 없었으므로, 이전에는 데스크탑 전용에 가까웠습니다.
 
 ## 개발 테스트
 
 ```bash
 # 번들 기능 테스트 — JavaScriptCore 셸 (macOS, node 미설치 환경)
 /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc -m test-plugin.mjs
-# => PASS 87 / 87 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
+# => PASS 106 / 106 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
 ```
 
 `test-plugin.mjs`는 가짜 `ctx`(graph/net)로 여섯 플러그인의 `run()`을 호출해

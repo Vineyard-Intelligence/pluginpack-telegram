@@ -38,11 +38,19 @@ function makeGraph(nodeById, createdNodes, createdEdges, updatedNodes) {
 // from every plugin request, so a pack that sends the token there ships a credential that is
 // deleted in transit and a gateway that answers 401 forever. Asserting the header the wire
 // actually carries is the only way this stays true.
+// The address the pack is pinned to. Asserted rather than assumed: the manifest endpoint and the
+// URL the pack actually builds are two separate strings, and if they drift the allowlist denies
+// every request at run time while these tests still pass.
+const GATEWAY_BASE = "https://auxiliary.vineyard.run/telegram";
+
 function makeNet(respond) {
   return {
     async fetch(url, init) {
       const body = JSON.parse(init.body);
-      const path = url.replace(/^https?:\/\/[^/]+/, "");
+      check(`request goes to the pinned gateway: ${url}`, url.startsWith(GATEWAY_BASE + "/"));
+      // Gateway-RELATIVE path, so the per-endpoint assertions below stay written as "/search"
+      // rather than repeating the mount prefix in every one of them.
+      const path = url.slice(GATEWAY_BASE.length);
       const headers = init.headers || {};
       if (headers.Authorization || headers.authorization) {
         check("token is NOT sent on Authorization (the bridge strips it)", false);
