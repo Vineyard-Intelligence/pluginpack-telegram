@@ -2,7 +2,7 @@
   "identifier": "run.vineyard.pluginpacks.telegram",
   "content_type": "vineyard:pluginpack",
   "name": "Telegram",
-  "version": "1.2.0",
+  "version": "1.5.0",
   "description": "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, and granular post / participant collection. The five plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   "author": {
     "name": "vineyard-run",
@@ -20,7 +20,7 @@
   "distribution": {
     "kind": "git",
     "repository": "https://github.com/Vineyard-Intelligence/pluginpack-telegram",
-    "ref": "v1.2.0",
+    "ref": "v1.5.0",
     "path": "plugins/telegram.manifest.json"
   },
   "plugins": [
@@ -28,7 +28,7 @@
       "identifier": "run.vineyard.plugins.telegram_search",
       "content_type": "vineyard:plugin",
       "name": "Telegram Search",
-      "version": "1.2.0",
+      "version": "1.5.0",
       "description": "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
       "icon": "search",
       "platforms": {
@@ -114,8 +114,8 @@
       "identifier": "run.vineyard.plugins.telegram_resolve",
       "content_type": "vineyard:plugin",
       "name": "Telegram Resolve",
-      "version": "1.2.0",
-      "description": "For each selected web.url node that is a t.me handle link (t.me/<username>), resolves the chat/user via the tgpeek gateway and creates the telegram.user / telegram.channel / telegram.group node with its full profile (bio/about, participant count, flags) and a links-to evidence edge from the source URL. Invite links and non-Telegram URLs are a no-op.",
+      "version": "1.5.0",
+      "description": "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
       "icon": "user-search",
       "platforms": {
         "primary": "web",
@@ -130,6 +130,26 @@
             "typepack": "run.vineyard.typepacks.infrastructure",
             "category": "web",
             "name": "url"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.identity",
+            "category": "identity",
+            "name": "handle"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.telegram",
+            "category": "telegram",
+            "name": "user"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.telegram",
+            "category": "telegram",
+            "name": "channel"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.telegram",
+            "category": "telegram",
+            "name": "group"
           }
         ],
         "produces": [
@@ -154,6 +174,7 @@
         "graph": [
           "node:read",
           "node:create",
+          "node:update",
           "edge:create"
         ],
         "network": [
@@ -188,8 +209,8 @@
       "identifier": "run.vineyard.plugins.telegram_invite_link",
       "content_type": "vineyard:plugin",
       "name": "Telegram Invite Link",
-      "version": "1.2.0",
-      "description": "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). With params.collect_mode=true the plugin also stages posts (+participants for groups) read without joining. Handle links and non-Telegram URLs are a no-op.",
+      "version": "1.5.0",
+      "description": "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). Handle links and non-Telegram URLs are a no-op. Analysis only — reading posts of an invite link is Telegram Posts' job (best-effort peek).",
       "icon": "link",
       "platforms": {
         "primary": "web",
@@ -210,34 +231,14 @@
           {
             "typepack": "run.vineyard.typepacks.telegram",
             "category": "telegram",
-            "name": "user"
-          },
-          {
-            "typepack": "run.vineyard.typepacks.telegram",
-            "category": "telegram",
             "name": "channel"
           },
           {
             "typepack": "run.vineyard.typepacks.telegram",
             "category": "telegram",
             "name": "group"
-          },
-          {
-            "typepack": "run.vineyard.typepacks.telegram",
-            "category": "telegram",
-            "name": "post"
           }
         ]
-      },
-      "params": {
-        "type": "object",
-        "properties": {
-          "collect_mode": {
-            "type": "boolean",
-            "default": false,
-            "description": "Also collect posts (+participants for groups) when the server grants a peek."
-          }
-        }
       },
       "scopes": {
         "graph": [
@@ -251,7 +252,7 @@
             "methods": [
               "POST"
             ],
-            "purpose": "tgpeek gateway: invite-link analysis / no-join collection. The origin is pinned here: run the gateway on its default 127.0.0.1:8787."
+            "purpose": "tgpeek gateway: invite-link analysis. The origin is pinned here: run the gateway on its default 127.0.0.1:8787."
           }
         ],
         "config": [
@@ -260,18 +261,6 @@
             "type": "string",
             "label": "tgpeek gateway token (sent as X-Tgpeek-Token)",
             "secret": true,
-            "optional": true
-          },
-          {
-            "key": "posts_limit",
-            "type": "number",
-            "label": "Max posts to collect per chat (blank = all)",
-            "optional": true
-          },
-          {
-            "key": "participants_limit",
-            "type": "number",
-            "label": "Max participants to collect per group (blank = all)",
             "optional": true
           }
         ]
@@ -289,7 +278,7 @@
       "identifier": "run.vineyard.plugins.telegram_posts",
       "content_type": "vineyard:plugin",
       "name": "Telegram Posts",
-      "version": "1.2.0",
+      "version": "1.5.0",
       "description": "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
       "icon": "list",
       "platforms": {
@@ -385,7 +374,7 @@
       "identifier": "run.vineyard.plugins.telegram_participants",
       "content_type": "vineyard:plugin",
       "name": "Telegram Participants",
-      "version": "1.2.0",
+      "version": "1.5.0",
       "description": "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
       "icon": "users",
       "platforms": {
@@ -444,6 +433,70 @@
             "key": "participants_limit",
             "type": "number",
             "label": "Max participants to collect per group (blank = all)",
+            "optional": true
+          }
+        ]
+      },
+      "lifecycle": {
+        "persistence": "opt-in",
+        "controls": [
+          "progress",
+          "cancel"
+        ],
+        "progress": "determinate"
+      }
+    },
+    {
+      "identifier": "run.vineyard.plugins.telegram_phone_lookup",
+      "content_type": "vineyard:plugin",
+      "name": "Telegram Phone Lookup",
+      "version": "1.5.0",
+      "description": "For each selected identity.phone_number node, resolves the number via the tgpeek gateway (contacts.resolvePhone — the same method t.me/+<number> deep links use) and creates the telegram.user node when the number has a Telegram account whose privacy settings allow phone lookup, plus a same-as edge from the user to the phone number node. Numbers with no account, or hidden from phone lookup, produce nothing. The gateway enforces Telegram's 3-second debounce and caches results for 1 hour.",
+      "icon": "phone",
+      "platforms": {
+        "primary": "web",
+        "web": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs"
+        }
+      },
+      "io": {
+        "consumes": [
+          {
+            "typepack": "run.vineyard.typepacks.identity",
+            "category": "identity",
+            "name": "phone_number"
+          }
+        ],
+        "produces": [
+          {
+            "typepack": "run.vineyard.typepacks.telegram",
+            "category": "telegram",
+            "name": "user"
+          }
+        ]
+      },
+      "scopes": {
+        "graph": [
+          "node:read",
+          "node:create",
+          "edge:create"
+        ],
+        "network": [
+          {
+            "endpoint": "http://127.0.0.1:8787",
+            "methods": [
+              "POST"
+            ],
+            "purpose": "tgpeek gateway: resolve a phone number to its Telegram user. The gateway origin must also be allowlisted in frontend net-allowlist.ts."
+          }
+        ],
+        "config": [
+          {
+            "key": "gateway_token",
+            "type": "string",
+            "label": "tgpeek gateway token (sent as X-Tgpeek-Token)",
+            "secret": true,
             "optional": true
           }
         ]

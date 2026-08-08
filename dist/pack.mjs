@@ -41,6 +41,25 @@ function extractInviteHash(url) {
   return q ? q[1] : null;
 }
 
+// Username from a t.me handle URL, including the t.me/s/ web-preview form.
+// (Only called after parseTelegramUrl says kind === "handle", so joinchat/+
+// URLs never reach it.)
+function handleFromUrl(url) {
+  const m = String(url).trim().match(/(?:t|telegram)\.(?:me|dog)\/(?:s\/)?([A-Za-z0-9_]+)/i);
+  return m ? m[1] : null;
+}
+
+// Primary handle of a telegram.* node: `username`, else the first line of `usernames`.
+function nodeHandle(data) {
+  const u = String((data && data.username) || "").trim();
+  if (u) return u;
+  const list = (data && data.usernames ? String(data.usernames) : "").split("\n").map((x) => x.trim()).filter(Boolean);
+  return list[0] || null;
+}
+
+// Telegram username shape: starts with a letter, 3-32 chars, [A-Za-z0-9_].
+const HANDLE_RE = /^[A-Za-z][A-Za-z0-9_]{2,31}$/;
+
 // ---- mapping ---------------------------------------------------------------
 function kindToType(kind) {
   if (kind === "channel") return "telegram.channel";
@@ -221,16 +240,6 @@ async function materializeParticipants(ctx, chatNodeId, participants) {
   return count;
 }
 
-// Full collection result (TargetResult dict) -> chat + posts + participants.
-async function materializeCollection(ctx, sourceNodeId, url, result) {
-  const info = result.info || {};
-  const chat = await ensureChat(ctx, sourceNodeId, url, info, "invite");
-  if (!chat) return 0;
-  const posts = await materializePosts(ctx, chat.id, info, result.posts || []);
-  const participants = await materializeParticipants(ctx, chat.id, result.participants || []);
-  return 1 + posts + participants;
-}
-
 // Selection helper: fetch the selected nodes, keep the ones the plugin handles.
 async function collectSelection(ctx) {
   const selection = (ctx.input && ctx.input.selection) || [];
@@ -248,7 +257,7 @@ const searchPlugin = {
     identifier: "run.vineyard.plugins.telegram_search",
     content_type: "vineyard:plugin",
     name: "Telegram Search",
-    version: "1.2.0",
+    version: "1.5.0",
     description:
       "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
     icon: "search",
@@ -323,16 +332,22 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    version: "1.2.0",
+    version: "1.5.0",
     description:
-      "For each selected web.url node that is a t.me handle link (t.me/<username>), resolves the chat/user via the tgpeek gateway and creates the telegram.user / telegram.channel / telegram.group node with its full profile (bio/about, participant count, flags) and a links-to evidence edge from the source URL. Invite links and non-Telegram URLs are a no-op.",
+      "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
     icon: "user-search",
     author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
     license: "MIT",
     distribution: { kind: "inline" },
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
     io: {
-      consumes: [{ typepack: "run.vineyard.typepacks.infrastructure", category: "web", name: "url" }],
+      consumes: [
+        { typepack: "run.vineyard.typepacks.infrastructure", category: "web", name: "url" },
+        { typepack: "run.vineyard.typepacks.identity", category: "identity", name: "handle" },
+        { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "user" },
+        { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "channel" },
+        { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "group" },
+      ],
       produces: [
         { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "user" },
         { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "channel" },
@@ -340,7 +355,7 @@ const resolvePlugin = {
       ],
     },
     scopes: {
-      graph: ["node:read", "node:create", "edge:create"],
+      graph: ["node:read", "node:create", "node:update", "edge:create"],
       network: [
         {
           endpoint: "http://127.0.0.1:8787",
@@ -360,28 +375,65 @@ const resolvePlugin = {
       return { summary: "Network capability not granted to this plugin", counts };
     }
     const nodes = await collectSelection(ctx);
-    if (!nodes.length) return { summary: "Select one or more web.url nodes (t.me handle links)", counts };
+    if (!nodes.length) return { summary: "Select web.url / telegram.* / identity.handle nodes", counts };
 
     for (let i = 0; i < nodes.length; i++) {
       if (ctx.signal && ctx.signal.aborted) break;
       const node = nodes[i];
-      if (node.type !== "web.url") { counts.skipped++; continue; }
-      const url = String((node.data && node.data.url) || "").trim();
-      const parsed = parseTelegramUrl(url);
-      if (!parsed || parsed.kind !== "handle") { counts.skipped++; continue; } // invites handled by telegram_invite_link
+      let target = null;
+      let mode = "create"; // create = new node (+links_to/same_as), update = enrich in place
+      let url;
+
+      if (node.type === "web.url") {
+        url = String((node.data && node.data.url) || "").trim();
+        const parsed = parseTelegramUrl(url);
+        if (!parsed || parsed.kind !== "handle") { counts.skipped++; continue; } // invites → telegram_invite_link
+        target = handleFromUrl(url);
+      } else if (node.type === "telegram.user" || node.type === "telegram.channel" || node.type === "telegram.group") {
+        target = nodeHandle(node.data);
+        if (!target) {
+          // No handle on the node: fall back to the stored telegram_id. Numeric
+          // resolution only works when the gateway session already knows the id,
+          // and the type guard below rejects mismatches (e.g. a channel id
+          // stored on a telegram.user node).
+          const id = String(node.data && node.data.telegram_id != null ? node.data.telegram_id : "").trim();
+          if (!id) { counts.skipped++; continue; }
+          target = id;
+        }
+        mode = "update";
+      } else if (node.type === "identity.handle") {
+        const raw = String((node.data && node.data.handle) || "").trim().replace(/^@+/, "");
+        if (!HANDLE_RE.test(raw)) { counts.skipped++; continue; } // not a telegram username shape
+        target = raw;
+      } else {
+        counts.skipped++;
+        continue;
+      }
 
       ctx.progress && ctx.progress.set && ctx.progress.set({
         percent: Math.round(((i + 1) / nodes.length) * 100),
-        message: `Resolving ${url}`,
+        message: `Resolving ${target}`,
       });
       counts.processed++;
       try {
-        const info = await postJson(ctx, "/resolve", { target: url });
-        const chat = await ensureChat(ctx, node.id, url, info, "public");
-        if (chat) { counts.collected++; } else { counts.skipped++; }
+        const info = await postJson(ctx, "/resolve", { target });
+        if (mode === "update") {
+          const type = kindToType(info.kind);
+          if (!type || type !== node.type) { counts.skipped++; continue; } // resolved to a different kind — stale node
+          const merged = { ...(node.data || {}), ...chatData(type, info, "public", undefined) };
+          await ctx.graph.updateNode(node.id, merged);
+          counts.collected++;
+        } else {
+          const chat = await ensureChat(ctx, node.id, url, info, "public");
+          if (!chat) { counts.skipped++; continue; }
+          if (node.type === "identity.handle") {
+            await ctx.graph.createEdge({ from: chat.id, to: node.id, label: "same as" });
+          }
+          counts.collected++;
+        }
       } catch (e) {
         counts.errors++;
-        console.warn(`telegram_resolve: ${url} failed:`, e);
+        console.warn(`telegram_resolve: ${target} failed:`, e);
       }
     }
     return {
@@ -397,9 +449,9 @@ const inviteLinkPlugin = {
     identifier: "run.vineyard.plugins.telegram_invite_link",
     content_type: "vineyard:plugin",
     name: "Telegram Invite Link",
-    version: "1.2.0",
+    version: "1.5.0",
     description:
-      "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). With params.collect_mode=true the plugin also stages posts (+participants for groups) read without joining. Handle links and non-Telegram URLs are a no-op.",
+      "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). Handle links and non-Telegram URLs are a no-op. Analysis only — reading posts of an invite link is Telegram Posts' job (best-effort peek).",
     icon: "link",
     author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
     license: "MIT",
@@ -408,21 +460,9 @@ const inviteLinkPlugin = {
     io: {
       consumes: [{ typepack: "run.vineyard.typepacks.infrastructure", category: "web", name: "url" }],
       produces: [
-        { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "user" },
         { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "channel" },
         { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "group" },
-        { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "post" },
       ],
-    },
-    params: {
-      type: "object",
-      properties: {
-        collect_mode: {
-          type: "boolean",
-          default: false,
-          description: "Also collect posts (+participants for groups) when the server grants a peek.",
-        },
-      },
     },
     scopes: {
       graph: ["node:read", "node:create", "edge:create"],
@@ -430,13 +470,11 @@ const inviteLinkPlugin = {
         {
           endpoint: "http://127.0.0.1:8787",
           methods: ["POST"],
-          purpose: "tgpeek gateway: invite-link analysis / no-join collection. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+          purpose: "tgpeek gateway: invite-link analysis. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
         },
       ],
       config: [
         { key: "gateway_token", type: "string", label: "tgpeek gateway token (sent as X-Tgpeek-Token)", secret: true, optional: true },
-        { key: "posts_limit", type: "number", label: "Max posts to collect per chat (blank = all)", optional: true },
-        { key: "participants_limit", type: "number", label: "Max participants to collect per group (blank = all)", optional: true },
       ],
     },
     lifecycle: { persistence: "opt-in", controls: ["progress", "cancel"], progress: "determinate" },
@@ -448,7 +486,6 @@ const inviteLinkPlugin = {
     }
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select one or more web.url nodes (invite links)", counts };
-    const collectMode = Boolean(ctx.params && ctx.params.collect_mode);
 
     for (let i = 0; i < nodes.length; i++) {
       if (ctx.signal && ctx.signal.aborted) break;
@@ -460,27 +497,20 @@ const inviteLinkPlugin = {
 
       ctx.progress && ctx.progress.set && ctx.progress.set({
         percent: Math.round(((i + 1) / nodes.length) * 100),
-        message: `${collectMode ? "Collecting" : "Analyzing"} ${url}`,
+        message: `Analyzing ${url}`,
       });
       counts.processed++;
       try {
-        const body = { link: url, ...gateway(ctx).limits };
-        if (collectMode) {
-          const result = await postJson(ctx, "/invite-link", { ...body, is_collect_mode: true });
-          const staged = await materializeCollection(ctx, node.id, url, result);
-          if (staged === 0) { counts.skipped++; } else { counts.collected++; }
-        } else {
-          const info = await postJson(ctx, "/invite-link", body);
-          const chat = await ensureChat(ctx, node.id, url, info, "invite");
-          if (chat) { counts.collected++; } else { counts.skipped++; }
-        }
+        const info = await postJson(ctx, "/invite-link", { link: url });
+        const chat = await ensureChat(ctx, node.id, url, info, "invite");
+        if (chat) { counts.collected++; } else { counts.skipped++; }
       } catch (e) {
         counts.errors++;
         console.warn(`telegram_invite_link: ${url} failed:`, e);
       }
     }
     return {
-      summary: `${collectMode ? "Collected" : "Analyzed"} ${counts.collected} invite link(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
+      summary: `Analyzed ${counts.collected} invite link(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
       counts,
     };
   },
@@ -492,7 +522,7 @@ const postsPlugin = {
     identifier: "run.vineyard.plugins.telegram_posts",
     content_type: "vineyard:plugin",
     name: "Telegram Posts",
-    version: "1.2.0",
+    version: "1.5.0",
     description:
       "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
     icon: "list",
@@ -588,7 +618,7 @@ const participantsPlugin = {
     identifier: "run.vineyard.plugins.telegram_participants",
     content_type: "vineyard:plugin",
     name: "Telegram Participants",
-    version: "1.2.0",
+    version: "1.5.0",
     description:
       "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
     icon: "users",
@@ -655,15 +685,93 @@ const participantsPlugin = {
   },
 };
 
+// ---- plugin: telegram_phone_lookup -------------------------------------------
+const phoneLookupPlugin = {
+  manifest: {
+    identifier: "run.vineyard.plugins.telegram_phone_lookup",
+    content_type: "vineyard:plugin",
+    name: "Telegram Phone Lookup",
+    version: "1.5.0",
+    description:
+      "For each selected identity.phone_number node, resolves the number via the tgpeek gateway (contacts.resolvePhone — the same method t.me/+<number> deep links use) and creates the telegram.user node when the number has a Telegram account whose privacy settings allow phone lookup, plus a same-as edge from the user to the phone number node. Numbers with no account, or hidden from phone lookup, produce nothing. The gateway enforces Telegram's 3-second debounce and caches results for 1 hour.",
+    icon: "phone",
+    author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
+    license: "MIT",
+    distribution: { kind: "inline" },
+    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
+    io: {
+      consumes: [{ typepack: "run.vineyard.typepacks.identity", category: "identity", name: "phone_number" }],
+      produces: [{ typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "user" }],
+    },
+    scopes: {
+      graph: ["node:read", "node:create", "edge:create"],
+      network: [
+        {
+          endpoint: "http://127.0.0.1:8787",
+          methods: ["POST"],
+          purpose: "tgpeek gateway: resolve a phone number to its Telegram user. The gateway origin must also be allowlisted in frontend net-allowlist.ts.",
+        },
+      ],
+      config: [
+        { key: "gateway_token", type: "string", label: "tgpeek gateway token (sent as X-Tgpeek-Token)", secret: true, optional: true },
+      ],
+    },
+    lifecycle: { persistence: "opt-in", controls: ["progress", "cancel"], progress: "determinate" },
+  },
+  async run(ctx) {
+    const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
+    if (!ctx.net || !ctx.net.fetch) {
+      return { summary: "Network capability not granted to this plugin", counts };
+    }
+    const nodes = await collectSelection(ctx);
+    if (!nodes.length) return { summary: "Select one or more identity.phone_number nodes", counts };
+
+    for (let i = 0; i < nodes.length; i++) {
+      if (ctx.signal && ctx.signal.aborted) break;
+      const node = nodes[i];
+      if (node.type !== "identity.phone_number") { counts.skipped++; continue; }
+      const phone = String((node.data && node.data.number) || "").trim();
+      if (!phone) { counts.skipped++; continue; }
+
+      ctx.progress && ctx.progress.set && ctx.progress.set({
+        percent: Math.round(((i + 1) / nodes.length) * 100),
+        message: `Looking up ${phone}`,
+      });
+      counts.processed++;
+      try {
+        const result = await postJson(ctx, "/phone-lookup", { phone });
+        if (!result.found || !result.info) { counts.skipped++; continue; }
+        const info = result.info;
+        const type = kindToType(info.kind);
+        if (!type) { counts.skipped++; continue; }
+        const user = await ctx.graph.createNode({
+          type,
+          data: chatData(type, info, "public", undefined),
+          key: `telegram:${type}:${info.id}`,
+        });
+        await ctx.graph.createEdge({ from: user.id, to: node.id, label: "same as" });
+        counts.collected++;
+      } catch (e) {
+        counts.errors++;
+        console.warn(`telegram_phone_lookup: ${phone} failed:`, e);
+      }
+    }
+    return {
+      summary: `Resolved ${counts.collected} phone number(s); ${counts.skipped} skipped (no user / hidden / no-op), ${counts.errors} error(s)`,
+      counts,
+    };
+  },
+};
+
 // ---- pack -------------------------------------------------------------------
 const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
   content_type: "vineyard:pluginpack",
   name: "Telegram",
-  version: "1.2.0",
+  version: "1.5.0",
   description:
-    "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, and granular post / participant collection. The five plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
-  plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest],
+    "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
+  plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
 };
 
-export default { manifest: packManifest, plugins: [searchPlugin, resolvePlugin, inviteLinkPlugin, postsPlugin, participantsPlugin] };
+export default { manifest: packManifest, plugins: [searchPlugin, resolvePlugin, inviteLinkPlugin, postsPlugin, participantsPlugin, phoneLookupPlugin] };

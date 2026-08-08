@@ -1,24 +1,26 @@
 # pluginpack-telegram
 
 텔레그램 읽기 전용 정찰 VINEYARD 플러그인 팩 — tgpeek 게이트웨이를 통해 **가입 없이** 수집합니다.
-플러그인 5개가 게이트웨이 엔드포인트와 **1:1 대응**하므로, AI 에이전트와 분석가 모두 필요한 조작만 골라 실행할 수 있습니다.
+플러그인 6개가 게이트웨이 엔드포인트와 **1:1 대응**하므로, AI 에이전트와 분석가 모두 필요한 조작만 골라 실행할 수 있습니다.
 
 ## 플러그인 ↔ 엔드포인트
 
 | 플러그인 | 식별자 | 입력 | 엔드포인트 | 생성물 |
 |---|---|---|---|---|
 | **Telegram Search** | `run.vineyard.plugins.telegram_search` | 전역 + `params.query` | `/search` | `telegram.user/channel/group` (검색 결과) |
-| **Telegram Resolve** | `run.vineyard.plugins.telegram_resolve` | `web.url` (t.me 핸들) | `/resolve` | 채팅/유저 노드 **정보만** (about·멤버수·플래그) + `links to` 증거 엣지 |
-| **Telegram Invite Link** | `run.vineyard.plugins.telegram_invite_link` | `web.url` (초대 링크) | `/invite-link` | 기본=분석(채팅 노드 + `invite_hash` + `peek`/`expires`), `params.collect_mode=true`=전체 수집(게시글+참여자) |
+| **Telegram Resolve** | `run.vineyard.plugins.telegram_resolve` | `web.url` (t.me 핸들, `t.me/s/` 포함) / `telegram.user`·`channel`·`group` / `identity.handle` | `/resolve` | 채팅/유저 노드 **정보만** (about·멤버수·플래그). URL·handle 입력 → 노드 생성 + `links to`/`same as` 증거 엣지, telegram.\* 노드 입력 → **in-place 정제** (updateNode) |
+| **Telegram Invite Link** | `run.vineyard.plugins.telegram_invite_link` | `web.url` (초대 링크) | `/invite-link` | **분석 전용** — 채팅 노드 + `invite_hash` + `peek`/`expires` (게시글은 Telegram Posts가 peek으로 처리) |
 | **Telegram Posts** | `run.vineyard.plugins.telegram_posts` | `web.url`(초대) / `telegram.channel` / `telegram.group` | `/posts` | `telegram.post` + `posted in`/`replied to` |
 | **Telegram Participants** | `run.vineyard.plugins.telegram_participants` | `telegram.group` | `/participants` | `telegram.user` + `participant of`/`admin of` |
+| **Telegram Phone Lookup** | `run.vineyard.plugins.telegram_phone_lookup` | `identity.phone_number` | `/phone-lookup` | `telegram.user` + `same as` 엣지 (번호→계정 귀속) |
 
 ## 동작 흐름
 
 ```
 Telegram Search ──▶ telegram.channel/group 노드 ──▶ Telegram Posts / Telegram Participants
 Telegram Resolve (t.me/<handle> URL) ──────────────┘
-Telegram Invite Link (초대 URL): 분석 ──▶ (peek 가능하면) collect_mode=true로 전체 수집
+Telegram Invite Link (초대 URL): 분석 ──▶ peek 가능하면 Telegram Posts가 게시글 수집
+Telegram Phone Lookup (identity.phone_number 노드) ──▶ telegram.user + same as
 ```
 
 - 모든 그래프 쓰기는 **스테이징**(capture:true) → analyst 리뷰 → 커밋
@@ -28,6 +30,7 @@ Telegram Invite Link (초대 URL): 분석 ──▶ (peek 가능하면) collect_
 - 비텔레그램 URL / 타입 불일치 입력은 **no-op** (아무것도 생성·수정하지 않음)
 - "login"은 플러그인 범위 밖 — 세션은 게이트웨이 운영자가 `tgpeek login`으로 관리
 - 용어: 텔레그램 표준 용어인 **participant**만 사용 (그래프 엣지 `participant_of`/`admin_of`)
+- **Phone Lookup**: `contacts.resolvePhone` 기반 — 번호가 미가입이거나 상대가 전화번호 조회를 숨겼으면 결과 없음(설계상 구분 불가). 게이트웨이가 텔레그램 공식 요구(3초/1회 디바운스)와 1시간 캐시를 적용.
 
 ## 구성 (scopes.config)
 
@@ -37,10 +40,10 @@ Vineyard의 **Run plugins 다이얼로그 → 각 플러그인의 Settings**에�
 | 키 | 타입 | 적용 플러그인 |
 |---|---|---|
 | `gateway_token` | string, **secret** | 전체 |
-| `posts_limit` | number | invite_link(collect 모드), posts |
-| `participants_limit` | number | invite_link(collect 모드), posts, participants |
+| `posts_limit` | number | posts |
+| `participants_limit` | number | posts, participants |
 
-`telegram_search`/`telegram_resolve`는 limit config를 사용하지 않습니다 (search는 `params.limit`).
+`telegram_search`/`telegram_resolve`/`telegram_phone_lookup`은 limit config를 사용하지 않습니다 (search는 `params.limit`).
 
 ### 토큰은 `X-Tgpeek-Token`으로 갑니다 — `Authorization`이 아닙니다
 
@@ -55,11 +58,16 @@ Vineyard의 **Run plugins 다이얼로그 → 각 플러그인의 Settings**에�
 
 ### `gateway_url`은 없습니다 (의도적)
 
-게이트웨이 오리진은 매니페스트가 고정하고(`http://127.0.0.1:8787`), `endpointCovers`는 포트까지
+게이트웨이 오리진은 매니페스트가 `http://127.0.0.1:8787`로 고정하고, `endpointCovers`는 포트까지
 포함한 파싱된 오리진으로 비교하며, 설치 게이트가 분석가에게 보여주는 것도 바로 그 엔드포인트입니다.
-설정 가능한 base URL은 모든 요청이 allowlist에서 거부되므로 — **아무것도 못 하는 손잡이는 없는
-것보다 나쁩니다.** 다른 포트가 필요하면 매니페스트를 바꿔야 하고, 그건 새 버전입니다.
-게이트웨이는 기본 포트 8787로 띄우십시오.
+설정 가능한 base URL은 매니페스트만으로는 동작할 수 없습니다 — allowlist 검사(프론트엔드)와
+CORS 워이버(데스크탑 셸)가 서로 다른 게이트라, 사용자가 CORS를 등록해도 allowlist가 여전히 거부하고,
+뚫으려면 `scopes.network` 문법 자체를 확장해야 합니다. **팩 하나 때문에 15개 팩이 공유하는 published
+스키마를 늘릴 이유는 없습니다** (다른 팩은 전부 공개·고정 호스트를 씁니다).
+
+게이트웨이는 Vineyard 전용 서비스이므로 **기본 포트 8787, `127.0.0.1`에 띄우십시오.**
+다른 주소가 필요해지면 그때 `scopes.network` 문법 확장(스키마 + SPEC + registry 선배포)까지
+묶어서 처리하는 게 순서입니다.
 
 ## 배포 전 필수 (웹 빌드)
 
@@ -71,8 +79,9 @@ Vineyard의 **Run plugins 다이얼로그 → 각 플러그인의 Settings**에�
 Access 검사를 받습니다. 게이트웨이는 프리플라이트에 `Access-Control-Allow-Private-Network: true`를
 답하므로 통과하지만, 이 역시 위의 tgpeek 최신 버전이 필요합니다.
 
-- 게이트웨이 origin(기본 `http://127.0.0.1:8787`)을 `net-allowlist.ts`에 추가
-- 게이트웨이 URL을 바꾸면 다섯 플러그인의 매니페스트 `scopes.network[0].endpoint`도 함께 변경
+별도로 `net-allowlist.ts`에 호스트를 추가할 필요는 없습니다 — 매니페스트가 곧 allowlist입니다.
+게이트웨이 주소를 바꾸려면 여섯 플러그인의 `scopes.network[0].endpoint`를 모두 고치고 재발행해야 합니다
+(위 `gateway_url` 절 참조).
 
 게이트웨이는 `tgpeek serve --token <TGPEEK_GATEWAY_TOKEN>`로 실행합니다
 (세션은 사전에 `tgpeek login`으로 생성; 게이트웨이 자체는 재로그인하지 않음).
@@ -82,10 +91,10 @@ Access 검사를 받습니다. 게이트웨이는 프리플라이트에 `Access-
 ```bash
 # 번들 기능 테스트 — JavaScriptCore 셸 (macOS, node 미설치 환경)
 /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc -m test-plugin.mjs
-# => PASS 60 / 60 (search / resolve / invite_link 분석+collect / posts / participants)
+# => PASS 87 / 87 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
 ```
 
-`test-plugin.mjs`는 가짜 `ctx`(graph/net)로 다섯 플러그인의 `run()`을 호출해
+`test-plugin.mjs`는 가짜 `ctx`(graph/net)로 여섯 플러그인의 `run()`을 호출해
 가드·게이트웨이 페이로드·노드/엣지 스테이징·증거 체인·no-op 규칙을 검증합니다.
 
 ## 배포
