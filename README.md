@@ -30,7 +30,7 @@ Telegram Phone Lookup (identity.phone_number 노드) ──▶ telegram.user + s
 - 비텔레그램 URL / 타입 불일치 입력은 **no-op** (아무것도 생성·수정하지 않음)
 - "login"은 플러그인 범위 밖 — 세션은 게이트웨이 운영자가 `tgpeek login`으로 관리
 - 용어: 텔레그램 표준 용어인 **participant**만 사용 (그래프 엣지 `participant_of`/`admin_of`)
-- **Phone Lookup**: `contacts.resolvePhone` 기반 — 번호가 미가입이거나 상대가 전화번호 조회를 숨겼으면 결과 없음(설계상 구분 불가). 게이트웨이가 텔레그램 공식 요구(3초/1회 디바운스)와 1시간 캐시를 적용.
+- **Phone Lookup**: `contacts.resolvePhone` 기반 — 번호가 미가입이거나 상대가 전화번호 조회를 숨겼으면 결과 없음(설계상 구분 불가). 게이트웨이가 1시간 캐시를 적용하고 동일 번호 동시 조회는 1회로 합칩니다. 텔레그램이 권고하는 3초 간격은 강제 사항이 아니라 기본 꺼짐(실제 제한은 FLOOD_WAIT이고 Telethon이 처리).
 
 ## 구성 (scopes.config)
 
