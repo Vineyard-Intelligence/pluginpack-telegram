@@ -56,7 +56,7 @@ function makeNet(respond) {
       check("search limit passed", body.limit === 10);
       return {
         results: [
-          { id: 100, kind: "channel", username: "pyc", title: "Py Channel" },
+          { id: 100, kind: "channel", username: "pyc", usernames: ["pyc", "pychannel"], title: "Py Channel" },
           { id: 200, kind: "supergroup", username: "pyg", title: "Py Group" },
           { id: 300, kind: "bot", username: "pybot", title: "Py Bot", is_bot: true },
           { id: 400, kind: "user", username: "pyuser", title: "Py User" },
@@ -71,6 +71,14 @@ function makeNet(respond) {
   check("search collected=4", result.counts.collected === 4);
   check("search errors=0", result.counts.errors === 0);
   check("search: channel node", createdNodes.some(n => n.type === "telegram.channel" && n.data.username === "pyc"));
+  check(
+    "search: multi-username joined one-per-line",
+    createdNodes.some(n => n.type === "telegram.channel" && n.data.usernames === "pyc\npychannel"),
+  );
+  check(
+    "search: single/absent usernames -> field omitted",
+    createdNodes.find(n => n.data.username === "pyg").data.usernames === undefined,
+  );
   check("search: group node (supergroup→group)", createdNodes.some(n => n.type === "telegram.group" && n.data.username === "pyg"));
   check("search: bot→user.is_bot", createdNodes.some(n => n.type === "telegram.user" && n.data.username === "pybot" && n.data.is_bot === true));
   check("search: user node", createdNodes.some(n => n.type === "telegram.user" && n.data.username === "pyuser"));
@@ -91,7 +99,10 @@ function makeNet(respond) {
     net: makeNet((path, body) => {
       check("resolve path=/resolve", path === "/resolve");
       check("resolve target=URL 그대로", body.target === "https://t.me/pythonkr");
-      return { id: 1554525468, kind: "channel", username: "pythonkr", display_name: "Python Korea", about: "파이썬", participants_count: 99999, verified: false };
+      return {
+        id: 1554525468, kind: "channel", username: "pythonkr", usernames: ["pythonkr"],
+        display_name: "Python Korea", about: "파이썬", participants_count: 99999, verified: false,
+      };
     }),
     progress: { set() {} },
     signal: { aborted: false },
@@ -106,6 +117,7 @@ function makeNet(respond) {
   check("resolve: chat node", !!chat);
   check("resolve: about stored", chat && chat.data.about === "파이썬");
   check("resolve: participants_count stored", chat && chat.data.participants_count === 99999);
+  check("resolve: usernames stored", chat && chat.data.usernames === "pythonkr");
   check("resolve: links_to evidence edge", createdEdges.some(e => e.from === "u1" && e.label === "links to"));
 }
 

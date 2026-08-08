@@ -23,6 +23,8 @@ Telegram Invite Link (초대 URL): 분석 ──▶ (peek 가능하면) collect_
 
 - 모든 그래프 쓰기는 **스테이징**(capture:true) → analyst 리뷰 → 커밋
 - 노드 생성은 `key`(예: `telegram:telegram.channel:<id>`)로 중복 생성 방지
+- `username`은 대표 핸들 하나, `usernames`엔 활성 상태인 전체 핸들이 줄바꿈으로 들어감 —
+  텔레그램의 컬렉터블/복수 유저네임 계정은 대표 핸들 외에 여러 개를 더 가질 수 있음 (tgpeek 0.3.0+ 필요)
 - 비텔레그램 URL / 타입 불일치 입력은 **no-op** (아무것도 생성·수정하지 않음)
 - "login"은 플러그인 범위 밖 — 세션은 게이트웨이 운영자가 `tgpeek login`으로 관리
 - 용어: 텔레그램 표준 용어인 **participant**만 사용 (그래프 엣지 `participant_of`/`admin_of`)
