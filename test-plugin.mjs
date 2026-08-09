@@ -265,6 +265,7 @@ function makeService(respond) {
   const calls = [];
   const ctx = {
     input: { selection: ["ch1", "grp1", "iv1", "other"] },
+    params: { limit: 5 },
     graph: makeGraph({
       ch1: { id: "ch1", type: "telegram.channel", data: { telegram_id: 111111, username: "chan1" } },
       grp1: { id: "grp1", type: "telegram.group", data: { telegram_id: 222222, username: "" } },
@@ -272,7 +273,7 @@ function makeService(respond) {
       other: { id: "other", type: "web.url", data: { url: "https://example.com/x" } },
     }, createdNodes, createdEdges),
     service: makeService((path, body) => {
-      calls.push([path, body.target]);
+      calls.push([path, body.target, body]);
       if (body.target === "chan1") {
         return { source: "public", info: { id: 111111, kind: "channel", title: "Chan 1", username: "chan1" }, posts: [{ id: 1, text: "one" }] };
       }
@@ -298,6 +299,10 @@ function makeService(respond) {
   check("posts errors=0", result.counts.errors === 0);
   check("posts targets: username 우선, numeric fallback, invite URL", calls.some(c => c[0] === "/posts" && c[1] === "chan1") && calls.some(c => c[0] === "/posts" && c[1] === "222222") && calls.some(c => c[0] === "/posts" && c[1] === "https://t.me/+ZzZz"));
   check("posts: post nodes x3", createdNodes.filter(n => n.type === "telegram.post").length === 3);
+  check("posts limit=5 from params", calls.every(c => c[2].limit === 5));
+  // 회귀 가드: 예전에는 config 블록 하나를 두 플러그인이 공유해서, posts 요청에
+  // participants_limit 이, participants 요청에 posts 의 limit 이 같이 실려 나갔다.
+  check("posts: participants_limit 안 보냄", calls.every(c => c[2].participants_limit === undefined));
   check("posts: edges to input node (no chat recreate)", createdEdges.some(e => e.label === "posted in" && e.to === "ch1") && createdEdges.some(e => e.label === "posted in" && e.to === "grp1"));
   check("posts: invite chat created + links_to", createdNodes.some(n => n.type === "telegram.channel" && n.data.username === "invchan") && createdEdges.some(e => e.from === "iv1" && e.label === "links to"));
   check("posts: no participant edges", !createdEdges.some(e => e.label === "participant of"));
@@ -310,7 +315,7 @@ function makeService(respond) {
   const calls = [];
   const ctx = {
     input: { selection: ["grp1", "ch1"] },
-    config: { participants_limit: 50 },
+    params: { limit: 50 },
     graph: makeGraph({
       grp1: { id: "grp1", type: "telegram.group", data: { telegram_id: 222222, username: "pyg" } },
       ch1: { id: "ch1", type: "telegram.channel", data: { telegram_id: 111111, username: "chan1" } },
@@ -318,7 +323,9 @@ function makeService(respond) {
     service: makeService((path, body) => {
       calls.push([path, body.target]);
       check("participants path=/participants", path === "/participants");
+      // params.limit 은 이 엔드포인트가 읽는 이름(participants_limit)으로 바뀌어 나가야 한다
       check("participants limit=50", body.participants_limit === 50);
+      check("participants: posts 의 limit 안 보냄", body.limit === undefined);
       return {
         info: { id: 222222, kind: "supergroup", title: "Py Group" },
         participants: [

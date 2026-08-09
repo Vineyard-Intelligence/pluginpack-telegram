@@ -32,17 +32,24 @@ Telegram Phone Lookup (identity.phone_number 노드) ──▶ telegram.user + s
 - 용어: 텔레그램 표준 용어인 **participant**만 사용 (그래프 엣지 `participant_of`/`admin_of`)
 - **Phone Lookup**: `contacts.resolvePhone` 기반 — 번호가 미가입이거나 상대가 전화번호 조회를 숨겼으면 결과 없음(설계상 구분 불가). 게이트웨이가 1시간 캐시를 적용하고 동일 번호 동시 조회는 1회로 합칩니다. 텔레그램이 권고하는 3초 간격은 강제 사항이 아니라 기본 꺼짐(실제 제한은 FLOOD_WAIT이고 Telethon이 처리).
 
-## 구성 (scopes.config)
+## 파라미터
 
-Vineyard의 **Run plugins 다이얼로그 → 각 플러그인의 Settings**에서 설정합니다. 값은 브라우저에
-저장되고, 플러그인은 **자기 매니페스트가 선언한 키만** 전달받습니다.
+이 팩은 **설정(scopes.config)이 없습니다.** 수집 상한은 실행할 때마다 정하는 값이므로
+**Run plugins 다이얼로그의 pre-run 폼**에서 받는 파라미터입니다.
 
-| 키 | 타입 | 적용 플러그인 |
+| 플러그인 | 파라미터 | 비고 |
 |---|---|---|
-| `posts_limit` | number | posts |
-| `participants_limit` | number | posts, participants |
+| `telegram_search` | `query` (필수), `limit` | 1–50, 기본 20 |
+| `telegram_posts` | `limit` | 채팅당 최대 포스트 수. 비우면 전체 |
+| `telegram_participants` | `limit` | 그룹당 최대 참가자 수. 비우면 전체 |
 
-`telegram_search`/`telegram_resolve`/`telegram_phone_lookup`은 limit config를 사용하지 않습니다 (search는 `params.limit`).
+`telegram_resolve`/`telegram_invite_link`/`telegram_phone_lookup`은 파라미터가 없습니다.
+
+**2.2.0에서 `posts_limit`/`participants_limit` 설정이 사라졌습니다.** 두 키가 든 config 블록
+하나를 posts와 participants가 그대로 공유하고 있어서, Posts가 참가자 수 노브를 노출하고
+Participants가 포스트 노브를 노출했으며, 각자 요청에 상대방 필드까지 실어 보냈습니다. 이제
+각 플러그인이 `limit` 하나만 받고, 게이트웨이가 읽는 이름(`/posts`는 `limit`, `/participants`는
+`participants_limit`)으로 플러그인 안에서 바꿔 보냅니다.
 
 **2.0.0에서 `gateway_token`이 사라졌습니다.** 분석가가 공용 서버 비밀을 들고 있을 이유가 없어졌습니다 —
 아래를 보십시오.
@@ -122,9 +129,10 @@ await ctx.service("telegram", "resolve", { method: "POST", body: JSON.stringify(
 ## 개발 테스트
 
 ```bash
-# 번들 기능 테스트 — JavaScriptCore 셸 (macOS, node 미설치 환경)
-/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc -m test-plugin.mjs
-# => PASS 106 / 106 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
+# 번들 기능 테스트
+node test-plugin.mjs
+# => PASS 216 / 216 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
+# jsc 셸로는 더 이상 돌지 않습니다 — test-plugin.mjs 가 node:fs 로 번들을 읽습니다.
 ```
 
 `test-plugin.mjs`는 가짜 `ctx`(graph/net)로 여섯 플러그인의 `run()`을 호출해

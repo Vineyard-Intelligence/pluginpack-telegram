@@ -137,17 +137,30 @@ function peerData(ref) {
 }
 
 // ---- gateway plumbing ------------------------------------------------------
-function gateway(ctx) {
-  const config = ctx.config || {};
-  // No address and no token any more. `ctx.service("telegram", …)` names a SERVICE; the host
-  // holds its URL and attaches the analyst's own Vineyard credential, and the gateway in front of
-  // tgpeek swaps that for tgpeek's bearer token after it has authenticated the analyst. So there
-  // is nothing here for a pack to configure, and — more to the point — nothing for it to leak.
-  // The old `gateway_token` asked every analyst to hold a shared server secret; that key is gone.
-  const limits = {};
-  if (config.posts_limit != null) limits.limit = Number(config.posts_limit);
-  if (config.participants_limit != null) limits.participants_limit = Number(config.participants_limit);
-  return { limits };
+// No address and no token. `ctx.service("telegram", …)` names a SERVICE; the host holds its URL
+// and attaches the analyst's own Vineyard credential, and the gateway in front of tgpeek swaps
+// that for tgpeek's bearer token after it has authenticated the analyst. So there is nothing here
+// for a pack to configure, and — more to the point — nothing for it to leak. The old
+// `gateway_token` asked every analyst to hold a shared server secret; that key is gone.
+//
+/**
+ * The per-run cap is a PARAMETER, not a setting.
+ *
+ * "How many to pull this time" is a decision the analyst makes at launch, and the pre-run form
+ * already collects it — `telegram_search.limit` has always worked that way. It used to live in
+ * `scopes.config`, and worse, ONE config block was pasted into both plugins: Posts advertised a
+ * participants knob, Participants advertised a posts knob, and each spread the whole object onto
+ * the wire, so a "Max posts" value rode along on /participants.
+ *
+ * The wire names really do differ — /posts reads `limit`, /participants reads `participants_limit`
+ * — so the caller names the field it needs. That mismatch belongs here, not in the analyst's form,
+ * which is why both plugins expose the same plain `limit` param.
+ */
+function runLimit(ctx, wireKey) {
+  const v = (ctx.params || {}).limit;
+  if (v == null || v === "") return {}; // blank = no cap, the gateway returns everything
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? { [wireKey]: n } : {};
 }
 
 // `fatal` marks a failure that the rest of the selection cannot recover from — a dead session is
@@ -307,7 +320,7 @@ const searchPlugin = {
     identifier: "run.vineyard.plugins.telegram_search",
     content_type: "vineyard:plugin",
     name: "Telegram Search",
-    version: "2.1.0",
+    version: "2.2.0",
     description:
       "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
     icon: "search",
@@ -367,7 +380,7 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    version: "2.1.0",
+    version: "2.2.0",
     description:
       "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
     icon: "user-search",
@@ -475,7 +488,7 @@ const inviteLinkPlugin = {
     identifier: "run.vineyard.plugins.telegram_invite_link",
     content_type: "vineyard:plugin",
     name: "Telegram Invite Link",
-    version: "2.1.0",
+    version: "2.2.0",
     description:
       "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). Handle links and non-Telegram URLs are a no-op. Analysis only — reading posts of an invite link is Telegram Posts' job (best-effort peek).",
     icon: "link",
@@ -539,7 +552,7 @@ const postsPlugin = {
     identifier: "run.vineyard.plugins.telegram_posts",
     content_type: "vineyard:plugin",
     name: "Telegram Posts",
-    version: "2.1.0",
+    version: "2.2.0",
     description:
       "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
     icon: "list",
@@ -559,14 +572,16 @@ const postsPlugin = {
         { typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "post" },
       ],
     },
+    params: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, description: "Max posts to collect per chat (blank = all)." },
+      },
+    },
     scopes: {
       graph: ["node:read", "node:create", "edge:create"],
       // Named, not addressed: the host owns the URL and attaches the analyst's identity.
       services: ["telegram"],
-      config: [
-        { key: "posts_limit", type: "number", label: "Max posts to collect per chat (blank = all)", optional: true },
-        { key: "participants_limit", type: "number", label: "Max participants to collect per group (blank = all)", optional: true },
-      ],
     },
     lifecycle: { persistence: "opt-in", controls: ["progress", "cancel"], progress: "determinate" },
   },
@@ -576,7 +591,7 @@ const postsPlugin = {
     requireService(ctx);
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select a web.url invite link or telegram.channel / telegram.group nodes", counts };
-    const limits = gateway(ctx).limits;
+    const limits = runLimit(ctx, "limit");
 
     for (let i = 0; i < nodes.length; i++) {
       if (ctx.signal && ctx.signal.aborted) break;
@@ -628,7 +643,7 @@ const participantsPlugin = {
     identifier: "run.vineyard.plugins.telegram_participants",
     content_type: "vineyard:plugin",
     name: "Telegram Participants",
-    version: "2.1.0",
+    version: "2.2.0",
     description:
       "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
     icon: "users",
@@ -640,14 +655,16 @@ const participantsPlugin = {
       consumes: [{ typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "group" }],
       produces: [{ typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "user" }],
     },
+    params: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, description: "Max participants to collect per group (blank = all)." },
+      },
+    },
     scopes: {
       graph: ["node:read", "node:create", "edge:create"],
       // Named, not addressed: the host owns the URL and attaches the analyst's identity.
       services: ["telegram"],
-      config: [
-        { key: "posts_limit", type: "number", label: "Max posts to collect per chat (blank = all)", optional: true },
-        { key: "participants_limit", type: "number", label: "Max participants to collect per group (blank = all)", optional: true },
-      ],
     },
     lifecycle: { persistence: "opt-in", controls: ["progress", "cancel"], progress: "determinate" },
   },
@@ -657,7 +674,7 @@ const participantsPlugin = {
     requireService(ctx);
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select one or more telegram.group nodes", counts };
-    const limits = gateway(ctx).limits;
+    const limits = runLimit(ctx, "participants_limit");
 
     for (let i = 0; i < nodes.length; i++) {
       if (ctx.signal && ctx.signal.aborted) break;
@@ -694,7 +711,7 @@ const phoneLookupPlugin = {
     identifier: "run.vineyard.plugins.telegram_phone_lookup",
     content_type: "vineyard:plugin",
     name: "Telegram Phone Lookup",
-    version: "2.1.0",
+    version: "2.2.0",
     description:
       "For each selected identity.phone_number node, resolves the number via the tgpeek gateway (contacts.resolvePhone — the same method t.me/+<number> deep links use) and creates the telegram.user node when the number has a Telegram account whose privacy settings allow phone lookup, plus a same-as edge from the user to the phone number node. Numbers with no account, or hidden from phone lookup, produce nothing. The gateway caches results for 1 hour and collapses concurrent lookups of one number into a single request.",
     icon: "phone",
@@ -762,7 +779,7 @@ const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
   content_type: "vineyard:pluginpack",
   name: "Telegram",
-  version: "2.1.0",
+  version: "2.2.0",
   description:
     "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
