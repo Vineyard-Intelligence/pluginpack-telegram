@@ -1,5 +1,6 @@
 // Functional test harness for pluginpack-telegram/dist/pack.mjs (5 plugins).
 // Run: jsc -m pluginpack-telegram/test-plugin.mjs
+import { readFileSync } from "node:fs";
 import pack from "./dist/pack.mjs";
 
 // Runs under BOTH node and the jsc shell, because each is missing what the other provides: jsc has
@@ -32,32 +33,30 @@ function makeGraph(nodeById, createdNodes, createdEdges, updatedNodes) {
   };
 }
 
-// respond(body, auth) -> response payload; path is the request path.
+// respond(path, body) -> response payload.
 //
-// `auth` is read from X-Tgpeek-Token, NOT Authorization. The host bridge strips `authorization`
-// from every plugin request, so a pack that sends the token there ships a credential that is
-// deleted in transit and a gateway that answers 401 forever. Asserting the header the wire
-// actually carries is the only way this stays true.
-// The address the pack is pinned to. Asserted rather than assumed: the manifest endpoint and the
-// URL the pack actually builds are two separate strings, and if they drift the allowlist denies
-// every request at run time while these tests still pass.
-const GATEWAY_BASE = "https://auxiliary.vineyard.run/telegram";
-
-function makeNet(respond) {
-  return {
-    async fetch(url, init) {
-      const body = JSON.parse(init.body);
-      check(`request goes to the pinned gateway: ${url}`, url.startsWith(GATEWAY_BASE + "/"));
-      // Gateway-RELATIVE path, so the per-endpoint assertions below stay written as "/search"
-      // rather than repeating the mount prefix in every one of them.
-      const path = url.slice(GATEWAY_BASE.length);
-      const headers = init.headers || {};
-      if (headers.Authorization || headers.authorization) {
-        check("token is NOT sent on Authorization (the bridge strips it)", false);
-      }
-      const auth = headers["X-Tgpeek-Token"] || null;
-      return { ok: true, status: 200, async text() { return "{}"; }, async json() { return respond(path, body, auth); } };
-    },
+// There is no `auth` argument any more, and that is the point: the pack holds no credential. The
+// analyst's Vineyard token is attached by the host, and the auxiliary gateway swaps it for
+// tgpeek's own only after authenticating that analyst — so the strongest thing this harness can
+// assert about credentials is that the pack sends NONE.
+// The pack no longer knows an address. It names a SERVICE, and the host resolves it — so what the
+// harness asserts changed with it: that the name is "telegram" and nothing else, that the path is
+// service-relative (no leading slash to climb out of the mount with), and that the pack sends no
+// credential of its own. There is no token for it to send any more; the gateway attaches tgpeek's
+// after authenticating the analyst, and a pack that still tried would be sending a header the
+// gateway overwrites.
+function makeService(respond) {
+  return async (name, path, init) => {
+    check(`service is "telegram", not ${name}`, name === "telegram");
+    check(`path is service-relative: ${path}`, !path.startsWith("/") && !path.includes(".."));
+    const headers = init?.headers || {};
+    const sent = Object.keys(headers).map((k) => k.toLowerCase());
+    check("pack sends no Authorization of its own", !sent.includes("authorization"));
+    check("pack sends no legacy gateway token", !sent.includes("x-tgpeek-token"));
+    const body = JSON.parse(init.body);
+    // Assertions below stay written as "/search" — the leading slash is the harness's, not the
+    // pack's, so an accidental absolute path in the pack still fails the check above.
+    return { ok: true, status: 200, async text() { return "{}"; }, async json() { return respond("/" + path, body, null); } };
   };
 }
 
@@ -68,11 +67,9 @@ function makeNet(respond) {
   const ctx = {
     input: { selection: [] },
     params: { query: "python", limit: 10 },
-    config: { gateway_token: "tok" },
     graph: makeGraph({}, createdNodes, createdEdges),
-    net: makeNet((path, body, auth) => {
+    service: makeService((path, body, auth) => {
       check("search path=/search", path === "/search");
-      check("search auth header (X-Tgpeek-Token)", auth === "tok");
       check("search query passed", body.query === "python");
       check("search limit passed", body.limit === 10);
       return {
@@ -113,7 +110,6 @@ function makeNet(respond) {
   const calls = [];
   const ctx = {
     input: { selection: ["u1", "u2", "u3", "u4", "tg1", "hd1", "hd2"] },
-    config: { gateway_token: "tok" },
     graph: makeGraph({
       u1: { id: "u1", type: "web.url", data: { url: "https://t.me/pythonkr" } },
       u2: { id: "u2", type: "web.url", data: { url: "https://t.me/+AbCdEfGh" } },
@@ -123,7 +119,7 @@ function makeNet(respond) {
       hd1: { id: "hd1", type: "identity.handle", data: { handle: "@somehandle" } },
       hd2: { id: "hd2", type: "identity.handle", data: { handle: "not a handle!!" } },
     }, createdNodes, createdEdges, updatedNodes),
-    net: makeNet((path, body) => {
+    service: makeService((path, body) => {
       check("resolve path=/resolve", path === "/resolve");
       calls.push(body.target);
       if (body.target === "pythonkr") {
@@ -177,7 +173,6 @@ function makeNet(respond) {
   const updatedNodes = [];
   const ctx = {
     input: { selection: ["bad_user", "bad_channel", "bad_group", "bot_ok", "bot_rev", "num_ok", "num_bad"] },
-    config: { gateway_token: "tok" },
     graph: makeGraph({
       // 유형 불일치: 노드 타입과 실제 엔티티 kind가 다름
       bad_user: { id: "bad_user", type: "telegram.user", data: { telegram_id: 1147595657, username: "HanaResearch" } },
@@ -190,7 +185,7 @@ function makeNet(respond) {
       num_ok: { id: "num_ok", type: "telegram.channel", data: { telegram_id: 1554525468 } },
       num_bad: { id: "num_bad", type: "telegram.user", data: { telegram_id: 1554525468 } },
     }, createdNodes, createdEdges, updatedNodes),
-    net: makeNet((path, body) => {
+    service: makeService((path, body) => {
       check("type-guard path=/resolve", path === "/resolve");
       if (body.target === "HanaResearch" || body.target === "1554525468") {
         return { id: 1147595657, kind: "channel", username: "HanaResearch", display_name: "하나증권" };
@@ -235,14 +230,13 @@ function makeNet(respond) {
   const createdEdges = [];
   const ctx = {
     input: { selection: ["i1", "i2", "i3"] },
-    config: { gateway_token: "tok" },
     params: {},
     graph: makeGraph({
       i1: { id: "i1", type: "web.url", data: { url: "https://t.me/+AbCdEfGh" } },
       i2: { id: "i2", type: "web.url", data: { url: "https://t.me/pythonkr" } },
       i3: { id: "i3", type: "web.url", data: { url: "https://example.com/x" } },
     }, createdNodes, createdEdges),
-    net: makeNet((path, body) => {
+    service: makeService((path, body) => {
       check("invite analysis path=/invite-link", path === "/invite-link");
       check("invite analysis: no is_collect_mode", !body.is_collect_mode);
       check("invite analysis link=URL", body.link === "https://t.me/+AbCdEfGh");
@@ -271,14 +265,13 @@ function makeNet(respond) {
   const calls = [];
   const ctx = {
     input: { selection: ["ch1", "grp1", "iv1", "other"] },
-    config: { gateway_token: "tok" },
     graph: makeGraph({
       ch1: { id: "ch1", type: "telegram.channel", data: { telegram_id: 111111, username: "chan1" } },
       grp1: { id: "grp1", type: "telegram.group", data: { telegram_id: 222222, username: "" } },
       iv1: { id: "iv1", type: "web.url", data: { url: "https://t.me/+ZzZz" } },
       other: { id: "other", type: "web.url", data: { url: "https://example.com/x" } },
     }, createdNodes, createdEdges),
-    net: makeNet((path, body) => {
+    service: makeService((path, body) => {
       calls.push([path, body.target]);
       if (body.target === "chan1") {
         return { source: "public", info: { id: 111111, kind: "channel", title: "Chan 1", username: "chan1" }, posts: [{ id: 1, text: "one" }] };
@@ -317,12 +310,12 @@ function makeNet(respond) {
   const calls = [];
   const ctx = {
     input: { selection: ["grp1", "ch1"] },
-    config: { gateway_token: "tok", participants_limit: 50 },
+    config: { participants_limit: 50 },
     graph: makeGraph({
       grp1: { id: "grp1", type: "telegram.group", data: { telegram_id: 222222, username: "pyg" } },
       ch1: { id: "ch1", type: "telegram.channel", data: { telegram_id: 111111, username: "chan1" } },
     }, createdNodes, createdEdges),
-    net: makeNet((path, body) => {
+    service: makeService((path, body) => {
       calls.push([path, body.target]);
       check("participants path=/participants", path === "/participants");
       check("participants limit=50", body.participants_limit === 50);
@@ -356,13 +349,12 @@ function makeNet(respond) {
   const calls = [];
   const ctx = {
     input: { selection: ["pn1", "pn2", "other"] },
-    config: { gateway_token: "tok" },
     graph: makeGraph({
       pn1: { id: "pn1", type: "identity.phone_number", data: { number: "+821012345678" } },
       pn2: { id: "pn2", type: "identity.phone_number", data: { number: "+82990000000" } },
       other: { id: "other", type: "web.url", data: { url: "https://example.com" } },
     }, createdNodes, createdEdges),
-    net: makeNet((path, body) => {
+    service: makeService((path, body) => {
       calls.push([path, body.phone]);
       check("phone path=/phone-lookup", path === "/phone-lookup");
       if (body.phone === "+821012345678") {
@@ -384,7 +376,36 @@ function makeNet(respond) {
 }
 
 say("pack: " + pack.manifest.identifier + " | plugins: " + pack.plugins.map(p => p.manifest.identifier.split(".").pop()).join(","));
+
+// ---------------------------------------------------------------- the declaration itself
+// The JSON manifest is what the registry validates; the bundle's copy is what the worker runs. A
+// scope changed in one and not the other is a pack that passes review and then cannot work — and
+// this pack has exactly the scope where that matters, because `services` is what decides whether
+// the host attaches a credential at all.
+{
+  const json = JSON.parse(readFileSync(new URL("./plugins/telegram.manifest.json", import.meta.url)));
+  check("manifest versions agree", json.version === pack.manifest.version);
+  check("member count agrees", json.plugins.length === pack.plugins.length);
+  for (let i = 0; i < json.plugins.length; i++) {
+    const a = json.plugins[i];
+    const b = pack.plugins[i].manifest;
+    check(`${a.identifier}: identifiers agree`, a.identifier === b.identifier);
+    // Key ORDER is not part of the declaration, so compare on sorted keys — otherwise the check
+    // fails on a reordering that changes nothing and stops being trusted.
+    const stable = (v) => JSON.stringify(v, (_k, x) =>
+      x && typeof x === "object" && !Array.isArray(x)
+        ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]]))
+        : x);
+    check(`${a.identifier}: scopes agree`, stable(a.scopes) === stable(b.scopes));
+    check(`${a.identifier}: declares the telegram service`, JSON.stringify(a.scopes.services) === '["telegram"]');
+    check(`${a.identifier}: declares NO arbitrary egress`, !("network" in a.scopes));
+    const cfg = (a.scopes.config || []).map((c) => c.key);
+    check(`${a.identifier}: no gateway token to hold`, !cfg.includes("gateway_token"));
+  }
+}
+
 say(`PASS ${ok.length} / ${ok.length + fail.length}`);
+
 // Exit non-zero on failure, or the harness reports a red result with a green exit code and
 // nothing that runs it automatically ever notices.
 if (fail.length) {
