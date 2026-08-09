@@ -150,6 +150,17 @@ function gateway(ctx) {
   return { limits };
 }
 
+// `fatal` marks a failure that the rest of the selection cannot recover from — a dead session is
+// dead for node 2 through 50 as well, and retrying it forty-nine times just spends the analyst's
+// time to print the same message. The per-item catch below re-throws these.
+class ServiceError extends Error {
+  constructor(message, fatal = false) {
+    super(message);
+    this.name = "ServiceError";
+    this.fatal = fatal;
+  }
+}
+
 async function postJson(ctx, path, body) {
   const res = await ctx.service("telegram", path.replace(/^\/+/, ""), {
     method: "POST",
@@ -158,16 +169,49 @@ async function postJson(ctx, path, body) {
   });
   if (res.status === 401) {
     // Not tgpeek refusing — the Vineyard session behind the call ended. Say which.
-    throw new Error("your session expired — sign in again and re-run");
+    throw new ServiceError("your session expired — sign in again and re-run", true);
   }
   if (res.status === 403) {
-    throw new Error("this Vineyard account is not permitted to use the Telegram service");
+    throw new ServiceError("this Vineyard account is not permitted to use the Telegram service", true);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`telegram service ${res.status}: ${text.slice(0, 200)}`);
+    throw new ServiceError(`telegram service ${res.status}: ${text.slice(0, 200)}`);
   }
   return res.json();
+}
+
+// How a run ENDS, and the reason this file has a helper for it.
+//
+// The host renders a THROWN error in red on the run's row, with its message. A RETURNED summary is
+// always a green "succeeded", however grim the text — and when the run staged nothing, the toast
+// does not even show the summary, it shows "No changes". So catching every error, counting it, and
+// returning `Resolved 0 handle(s); 0 skipped, 3 error(s)` — which is what this pack used to do —
+// made a gateway that was down indistinguishable from three handles that simply have no Telegram
+// account. Both read as a quiet green success.
+//
+// Per-item catching stays: one unreachable handle must not abandon the other forty-nine. What
+// changes is the ending — if NOTHING was collected and something failed, the run failed, and the
+// analyst gets the first real error message rather than a tally. A partial run still succeeds, but
+// carries that message in its summary instead of a number nobody can act on.
+function finish(summary, counts, firstError) {
+  if (firstError && !counts.collected) throw new Error(firstError);
+  return { summary: firstError ? `${summary} — first error: ${firstError}` : summary, counts };
+}
+
+// Uniform per-item catch: record the first real message, and let a fatal one end the sweep.
+function noteError(counts, state, e) {
+  if (e && e.fatal) throw e;
+  counts.errors++;
+  state.firstError ??= e && e.message ? String(e.message) : String(e);
+}
+
+// A build with no `ctx.service` cannot reach the gateway at all. That is a broken install, not an
+// empty result, so it throws rather than returning a summary nobody would read as a problem.
+function requireService(ctx) {
+  if (!ctx.service) {
+    throw new Error("this Vineyard build does not offer the Telegram service (ctx.service) — update the app");
+  }
 }
 
 // ---- materialization -------------------------------------------------------
@@ -263,7 +307,7 @@ const searchPlugin = {
     identifier: "run.vineyard.plugins.telegram_search",
     content_type: "vineyard:plugin",
     name: "Telegram Search",
-    version: "2.0.0",
+    version: "2.1.0",
     description:
       "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
     icon: "search",
@@ -296,31 +340,24 @@ const searchPlugin = {
   },
   async run(ctx) {
     const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
-    if (!ctx.service) {
-      return { summary: "this Vineyard build does not offer the Telegram service (ctx.service)", counts };
-    }
+    requireService(ctx);
     const params = ctx.params || {};
     const query = String(params.query || "").trim();
     if (!query) return { summary: "Provide a search query (params.query)", counts };
 
     ctx.progress && ctx.progress.set && ctx.progress.set({ percent: 10, message: `Searching "${query}"` });
-    try {
-      const result = await postJson(ctx, "/search", { query, limit: Number(params.limit) || 20 });
-      let made = 0;
-      for (const ref of result.results || []) {
-        const mapped = peerData(ref);
-        if (!mapped) { counts.skipped++; continue; }
-        await ctx.graph.createNode({ type: mapped.type, data: mapped.data, key: `telegram:${mapped.type}:${ref.id}` });
-        made++;
-      }
-      counts.processed = 1;
-      counts.collected = made;
-      return { summary: `Search "${query}": ${made} result(s) materialized`, counts };
-    } catch (e) {
-      counts.errors++;
-      console.warn("telegram_search failed:", e);
-      return { summary: `Search failed: ${e.message}`, counts };
+    // One request, one outcome — nothing to keep going for, so a failure here just propagates.
+    const result = await postJson(ctx, "/search", { query, limit: Number(params.limit) || 20 });
+    let made = 0;
+    for (const ref of result.results || []) {
+      const mapped = peerData(ref);
+      if (!mapped) { counts.skipped++; continue; }
+      await ctx.graph.createNode({ type: mapped.type, data: mapped.data, key: `telegram:${mapped.type}:${ref.id}` });
+      made++;
     }
+    counts.processed = 1;
+    counts.collected = made;
+    return { summary: `Search "${query}": ${made} result(s) materialized`, counts };
   },
 };
 
@@ -330,7 +367,7 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    version: "2.0.0",
+    version: "2.1.0",
     description:
       "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
     icon: "user-search",
@@ -361,9 +398,8 @@ const resolvePlugin = {
   },
   async run(ctx) {
     const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
-    if (!ctx.service) {
-      return { summary: "this Vineyard build does not offer the Telegram service (ctx.service)", counts };
-    }
+    const state = {};
+    requireService(ctx);
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select web.url / telegram.* / identity.handle nodes", counts };
 
@@ -422,14 +458,14 @@ const resolvePlugin = {
           counts.collected++;
         }
       } catch (e) {
-        counts.errors++;
-        console.warn(`telegram_resolve: ${target} failed:`, e);
+        noteError(counts, state, e);
       }
     }
-    return {
-      summary: `Resolved ${counts.collected} handle(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
+    return finish(
+      `Resolved ${counts.collected} handle(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
       counts,
-    };
+      state.firstError,
+    );
   },
 };
 
@@ -439,7 +475,7 @@ const inviteLinkPlugin = {
     identifier: "run.vineyard.plugins.telegram_invite_link",
     content_type: "vineyard:plugin",
     name: "Telegram Invite Link",
-    version: "2.0.0",
+    version: "2.1.0",
     description:
       "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). Handle links and non-Telegram URLs are a no-op. Analysis only — reading posts of an invite link is Telegram Posts' job (best-effort peek).",
     icon: "link",
@@ -463,9 +499,8 @@ const inviteLinkPlugin = {
   },
   async run(ctx) {
     const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
-    if (!ctx.service) {
-      return { summary: "this Vineyard build does not offer the Telegram service (ctx.service)", counts };
-    }
+    const state = {};
+    requireService(ctx);
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select one or more web.url nodes (invite links)", counts };
 
@@ -487,14 +522,14 @@ const inviteLinkPlugin = {
         const chat = await ensureChat(ctx, node.id, url, info, "invite");
         if (chat) { counts.collected++; } else { counts.skipped++; }
       } catch (e) {
-        counts.errors++;
-        console.warn(`telegram_invite_link: ${url} failed:`, e);
+        noteError(counts, state, e);
       }
     }
-    return {
-      summary: `Analyzed ${counts.collected} invite link(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
+    return finish(
+      `Analyzed ${counts.collected} invite link(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
       counts,
-    };
+      state.firstError,
+    );
   },
 };
 
@@ -504,7 +539,7 @@ const postsPlugin = {
     identifier: "run.vineyard.plugins.telegram_posts",
     content_type: "vineyard:plugin",
     name: "Telegram Posts",
-    version: "2.0.0",
+    version: "2.1.0",
     description:
       "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
     icon: "list",
@@ -537,9 +572,8 @@ const postsPlugin = {
   },
   async run(ctx) {
     const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
-    if (!ctx.service) {
-      return { summary: "this Vineyard build does not offer the Telegram service (ctx.service)", counts };
-    }
+    const state = {};
+    requireService(ctx);
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select a web.url invite link or telegram.channel / telegram.group nodes", counts };
     const limits = gateway(ctx).limits;
@@ -577,14 +611,14 @@ const postsPlugin = {
           counts.skipped++;
         }
       } catch (e) {
-        counts.errors++;
-        console.warn(`telegram_posts: ${node.id} failed:`, e);
+        noteError(counts, state, e);
       }
     }
-    return {
-      summary: `Posts collected for ${counts.collected} chat(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
+    return finish(
+      `Posts collected for ${counts.collected} chat(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
       counts,
-    };
+      state.firstError,
+    );
   },
 };
 
@@ -594,7 +628,7 @@ const participantsPlugin = {
     identifier: "run.vineyard.plugins.telegram_participants",
     content_type: "vineyard:plugin",
     name: "Telegram Participants",
-    version: "2.0.0",
+    version: "2.1.0",
     description:
       "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
     icon: "users",
@@ -619,9 +653,8 @@ const participantsPlugin = {
   },
   async run(ctx) {
     const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
-    if (!ctx.service) {
-      return { summary: "this Vineyard build does not offer the Telegram service (ctx.service)", counts };
-    }
+    const state = {};
+    requireService(ctx);
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select one or more telegram.group nodes", counts };
     const limits = gateway(ctx).limits;
@@ -644,14 +677,14 @@ const participantsPlugin = {
         const participants = await materializeParticipants(ctx, node.id, result.participants || []);
         if (participants > 0) { counts.collected++; } else { counts.skipped++; }
       } catch (e) {
-        counts.errors++;
-        console.warn(`telegram_participants: ${target} failed:`, e);
+        noteError(counts, state, e);
       }
     }
-    return {
-      summary: `Participants collected for ${counts.collected} group(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
+    return finish(
+      `Participants collected for ${counts.collected} group(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
       counts,
-    };
+      state.firstError,
+    );
   },
 };
 
@@ -661,7 +694,7 @@ const phoneLookupPlugin = {
     identifier: "run.vineyard.plugins.telegram_phone_lookup",
     content_type: "vineyard:plugin",
     name: "Telegram Phone Lookup",
-    version: "2.0.0",
+    version: "2.1.0",
     description:
       "For each selected identity.phone_number node, resolves the number via the tgpeek gateway (contacts.resolvePhone — the same method t.me/+<number> deep links use) and creates the telegram.user node when the number has a Telegram account whose privacy settings allow phone lookup, plus a same-as edge from the user to the phone number node. Numbers with no account, or hidden from phone lookup, produce nothing. The gateway caches results for 1 hour and collapses concurrent lookups of one number into a single request.",
     icon: "phone",
@@ -682,9 +715,8 @@ const phoneLookupPlugin = {
   },
   async run(ctx) {
     const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
-    if (!ctx.service) {
-      return { summary: "this Vineyard build does not offer the Telegram service (ctx.service)", counts };
-    }
+    const state = {};
+    requireService(ctx);
     const nodes = await collectSelection(ctx);
     if (!nodes.length) return { summary: "Select one or more identity.phone_number nodes", counts };
 
@@ -714,14 +746,14 @@ const phoneLookupPlugin = {
         await ctx.graph.createEdge({ from: user.id, to: node.id, label: "same as" });
         counts.collected++;
       } catch (e) {
-        counts.errors++;
-        console.warn(`telegram_phone_lookup: ${phone} failed:`, e);
+        noteError(counts, state, e);
       }
     }
-    return {
-      summary: `Resolved ${counts.collected} phone number(s); ${counts.skipped} skipped (no user / hidden / no-op), ${counts.errors} error(s)`,
+    return finish(
+      `Resolved ${counts.collected} phone number(s); ${counts.skipped} skipped (no user / hidden / no-op), ${counts.errors} error(s)`,
       counts,
-    };
+      state.firstError,
+    );
   },
 };
 
@@ -730,7 +762,7 @@ const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
   content_type: "vineyard:pluginpack",
   name: "Telegram",
-  version: "2.0.0",
+  version: "2.1.0",
   description:
     "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],

@@ -375,6 +375,116 @@ function makeService(respond) {
   check("phone: same-as edge to phone node", createdEdges.some(e => e.label === "same as" && e.from === createdNodes.find(n => n.type === "telegram.user").id && e.to === "pn1"));
 }
 
+// -------------------------------------------------------- how a failed run ENDS
+// The bug this covers: every plugin caught its per-item errors, counted them, and RETURNED. The
+// host renders a returned summary as a green "succeeded" — and when the run staged nothing, the
+// toast reads "No changes". So a gateway that was down looked exactly like a handle with no
+// Telegram account. What follows pins the three endings apart.
+{
+  // Minimal service double: fixed status, no assertions — the credential assertions in
+  // makeService() are about a request that gets made, and half of these never get that far.
+  const failing = (plan) => {
+    const calls = [];
+    const fn = async (_name, path, init) => {
+      calls.push(path);
+      const step = plan[Math.min(calls.length - 1, plan.length - 1)];
+      return {
+        ok: step.status < 400,
+        status: step.status,
+        async text() { return step.body ?? "gateway down"; },
+        async json() { return step.json ?? {}; },
+      };
+    };
+    fn.calls = calls;
+    return fn;
+  };
+  const twoHandles = () => ({
+    input: { selection: ["h1", "h2"] },
+    graph: makeGraph({
+      h1: { id: "h1", type: "identity.handle", data: { handle: "alpha_one" } },
+      h2: { id: "h2", type: "identity.handle", data: { handle: "beta_two" } },
+    }, [], [], []),
+  });
+  const caught = async (fn) => { try { await fn(); return null; } catch (e) { return e.message; } };
+
+  // 1. Everything failed -> the run FAILS, carrying the real message. Not "0 resolved".
+  {
+    const ctx = { ...twoHandles(), service: failing([{ status: 502 }]) };
+    const msg = await caught(() => resolvePlugin.run(ctx));
+    check("all-fail: run throws instead of returning a green summary", msg !== null);
+    check("all-fail: message is the gateway's, not a tally", (msg || "").includes("502"));
+    check("all-fail: both items were still attempted", ctx.service.calls.length === 2);
+  }
+
+  // 2. Partial -> still a success (one handle DID resolve), but the failure is in the summary
+  //    rather than hidden behind a count the analyst cannot act on.
+  {
+    const ctx = {
+      ...twoHandles(),
+      service: failing([
+        { status: 500, body: "upstream exploded" },
+        { status: 200, json: { id: 7, kind: "user", username: "beta_two", display_name: "Beta" } },
+      ]),
+    };
+    const res = await resolvePlugin.run(ctx);
+    check("partial: does not throw", !!res);
+    check("partial: counts one collected", res.counts.collected === 1 && res.counts.errors === 1);
+    check("partial: summary names the error", res.summary.includes("first error") && res.summary.includes("500"));
+  }
+
+  // 3. A dead session is dead for the whole selection. Stop at the first 401 instead of spending
+  //    the other forty-nine attempts printing the same thing.
+  {
+    const ctx = { ...twoHandles(), service: failing([{ status: 401 }]) };
+    const msg = await caught(() => resolvePlugin.run(ctx));
+    check("401: run fails", (msg || "").includes("session expired"));
+    check("401: sweep stops at the first one", ctx.service.calls.length === 1);
+  }
+  {
+    const ctx = { ...twoHandles(), service: failing([{ status: 403 }]) };
+    const msg = await caught(() => resolvePlugin.run(ctx));
+    check("403: run fails and stops", (msg || "").includes("not permitted") && ctx.service.calls.length === 1);
+  }
+
+  // 4. THE NEGATIVE. An honest empty answer must stay a success — otherwise the fix trades a
+  //    silent failure for a false alarm, which is the worse of the two.
+  {
+    const nothing = failing([{ status: 200, json: { found: false } }]);
+    const ctx = {
+      input: { selection: ["p1"] },
+      graph: makeGraph({ p1: { id: "p1", type: "identity.phone_number", data: { number: "+821000000000" } } }, [], [], []),
+      service: nothing,
+    };
+    const res = await phoneLookupPlugin.run(ctx);
+    check("no-result: a number with no account is NOT a failure", !!res && res.counts.errors === 0);
+    check("no-result: it is reported as skipped", res.counts.skipped === 1);
+  }
+  {
+    // Same for a selection this plugin does not handle: nothing attempted, nothing failed.
+    const ctx = {
+      input: { selection: ["x1"] },
+      graph: makeGraph({ x1: { id: "x1", type: "web.url", data: { url: "https://example.com" } } }, [], [], []),
+      service: failing([{ status: 200 }]),
+    };
+    const res = await resolvePlugin.run(ctx);
+    check("no-op input: still a success", !!res && res.counts.skipped === 1 && res.counts.errors === 0);
+  }
+
+  // 5. Single-shot search has nothing to keep going for — the error just propagates.
+  {
+    const ctx = { params: { query: "kimsuky" }, graph: makeGraph({}, [], [], []), service: failing([{ status: 503 }]) };
+    const msg = await caught(() => searchPlugin.run(ctx));
+    check("search: a failed search fails the run", (msg || "").includes("503"));
+  }
+
+  // 6. No service at all is a broken install, not an empty answer.
+  for (const p of pack.plugins) {
+    const ctx = { params: { query: "x" }, input: { selection: [] }, graph: makeGraph({}, [], [], []) };
+    const msg = await caught(() => p.run(ctx));
+    check(`${p.manifest.identifier.split(".").pop()}: missing ctx.service throws`, (msg || "").includes("ctx.service"));
+  }
+}
+
 say("pack: " + pack.manifest.identifier + " | plugins: " + pack.plugins.map(p => p.manifest.identifier.split(".").pop()).join(","));
 
 // ---------------------------------------------------------------- the declaration itself
