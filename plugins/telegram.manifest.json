@@ -6,7 +6,7 @@
   "description": "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, and granular post / participant collection. The five plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   "author": {
     "name": "VINEYARD",
-    "url": "https://github.com/vineyard-run"
+    "url": "https://github.com/Vineyard-Intelligence"
   },
   "license": "Apache-2.0",
   "icon": "send",
