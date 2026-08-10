@@ -324,7 +324,7 @@ const searchPlugin = {
     description:
       "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
     icon: "search",
-    author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
+    author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
     distribution: { kind: "inline" },
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
@@ -384,7 +384,7 @@ const resolvePlugin = {
     description:
       "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
     icon: "user-search",
-    author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
+    author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
     distribution: { kind: "inline" },
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
@@ -492,7 +492,7 @@ const inviteLinkPlugin = {
     description:
       "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). Handle links and non-Telegram URLs are a no-op. Analysis only — reading posts of an invite link is Telegram Posts' job (best-effort peek).",
     icon: "link",
-    author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
+    author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
     distribution: { kind: "inline" },
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
@@ -556,7 +556,7 @@ const postsPlugin = {
     description:
       "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
     icon: "list",
-    author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
+    author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
     distribution: { kind: "inline" },
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
@@ -647,7 +647,7 @@ const participantsPlugin = {
     description:
       "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
     icon: "users",
-    author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
+    author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
     distribution: { kind: "inline" },
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
@@ -715,7 +715,7 @@ const phoneLookupPlugin = {
     description:
       "For each selected identity.phone_number node, resolves the number via the tgpeek gateway (contacts.resolvePhone — the same method t.me/+<number> deep links use) and creates the telegram.user node when the number has a Telegram account whose privacy settings allow phone lookup, plus a same-as edge from the user to the phone number node. Numbers with no account, or hidden from phone lookup, produce nothing. The gateway caches results for 1 hour and collapses concurrent lookups of one number into a single request.",
     icon: "phone",
-    author: { name: "VINEYARD.RUN", url: "https://vineyard.run" },
+    author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
     distribution: { kind: "inline" },
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
