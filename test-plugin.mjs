@@ -166,7 +166,22 @@ function makeService(respond) {
 
   const hdChat = createdNodes.find(n => n.type === "telegram.user" && n.data.username === "somehandle");
   check("resolve: identity.handle → user 노드 생성", !!hdChat);
-  check("resolve: identity.handle → same-as 엣지", createdEdges.some(e => e.label === "same as" && e.from === hdChat.id && e.to === "hd1"));
+  // Direction matters: handle -> user, not user -> handle. And the wording must NOT assert
+  // identity — Telegram recycles usernames, and the handle node is a hub shared by every account
+  // that ever used that string, so "same as" merged unrelated people into one entity.
+  check(
+    "resolve: identity.handle → 'currently resolves to' 엣지 (handle→user)",
+    createdEdges.some(e => e.label === "currently resolves to" && e.from === "hd1" && e.to === hdChat.id),
+  );
+  check(
+    "resolve: identity.handle에 same-as 엣지를 만들지 않음",
+    !createdEdges.some(e => e.label === "same as" && (e.from === "hd1" || e.to === "hd1")),
+  );
+  // The old code drew handle->user ("links to") AND user->handle ("same as"). One pair, one edge.
+  check(
+    "resolve: handle↔user 쌍에 엣지 1개만",
+    createdEdges.filter(e => (e.from === "hd1" && e.to === hdChat.id) || (e.from === hdChat.id && e.to === "hd1")).length === 1,
+  );
 }
 
 // -------------------------------------------------- resolve 타입 가드 (mismatch)
