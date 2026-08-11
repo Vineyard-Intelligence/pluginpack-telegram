@@ -2,7 +2,7 @@
   "identifier": "run.vineyard.pluginpacks.telegram",
   "content_type": "vineyard:pluginpack",
   "name": "Telegram",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, and granular post / participant collection. The five plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   "author": {
     "name": "VINEYARD",
@@ -20,7 +20,7 @@
   "distribution": {
     "kind": "git",
     "repository": "https://github.com/Vineyard-Intelligence/pluginpack-telegram",
-    "ref": "v2.2.0",
+    "ref": "v2.3.0",
     "path": "plugins/telegram.manifest.json"
   },
   "plugins": [
@@ -99,8 +99,8 @@
       "identifier": "run.vineyard.plugins.telegram_resolve",
       "content_type": "vineyard:plugin",
       "name": "Telegram Resolve",
-      "version": "2.2.0",
-      "description": "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
+      "version": "2.3.0",
+      "description": "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op. A handle with no Telegram account is reported as a normal result (no_account), not a failure.",
       "icon": "user-search",
       "platforms": {
         "primary": "web",

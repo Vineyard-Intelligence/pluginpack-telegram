@@ -124,17 +124,20 @@ function makeService(respond) {
       calls.push(body.target);
       if (body.target === "pythonkr") {
         return {
-          id: 1554525468, kind: "channel", username: "pythonkr", usernames: ["pythonkr"],
-          display_name: "Python Korea", about: "파이썬", participants_count: 99999, verified: false,
+          found: true, target: body.target,
+          info: {
+            id: 1554525468, kind: "channel", username: "pythonkr", usernames: ["pythonkr"],
+            display_name: "Python Korea", about: "파이썬", participants_count: 99999, verified: false,
+          },
         };
       }
       if (body.target.toLowerCase() === "hanaresearch") {
-        return { id: 1147595657, kind: "channel", username: "HanaResearch", display_name: "하나증권 리서치", about: "리서치", participants_count: 24475, verified: false };
+        return { found: true, target: body.target, info: { id: 1147595657, kind: "channel", username: "HanaResearch", display_name: "하나증권 리서치", about: "리서치", participants_count: 24475, verified: false } };
       }
       if (body.target === "lightuser") {
-        return { id: 500, kind: "user", username: "lightuser", display_name: "Light User", about: "full bio", participants_count: null, is_bot: false };
+        return { found: true, target: body.target, info: { id: 500, kind: "user", username: "lightuser", display_name: "Light User", about: "full bio", participants_count: null, is_bot: false } };
       }
-      return { id: 900, kind: "user", username: "somehandle", display_name: "Some Handle" };
+      return { found: true, target: body.target, info: { id: 900, kind: "user", username: "somehandle", display_name: "Some Handle" } };
     }),
     progress: { set() {} },
     signal: { aborted: false },
@@ -187,20 +190,21 @@ function makeService(respond) {
     }, createdNodes, createdEdges, updatedNodes),
     service: makeService((path, body) => {
       check("type-guard path=/resolve", path === "/resolve");
+      const found = (info) => ({ found: true, target: body.target, info });
       if (body.target === "HanaResearch" || body.target === "1554525468") {
-        return { id: 1147595657, kind: "channel", username: "HanaResearch", display_name: "하나증권" };
+        return found({ id: 1147595657, kind: "channel", username: "HanaResearch", display_name: "하나증권" });
       }
       if (body.target === "lightuser") {
-        return { id: 500, kind: "user", username: "lightuser", display_name: "Light" };
+        return found({ id: 500, kind: "user", username: "lightuser", display_name: "Light" });
       }
       if (body.target === "somehandle") {
-        return { id: 300, kind: "user", username: "somehandle", display_name: "Some" };
+        return found({ id: 300, kind: "user", username: "somehandle", display_name: "Some" });
       }
       if (body.target === "botlike") {
-        return { id: 601, kind: "bot", username: "botlike", display_name: "Bot Like", is_bot: true };
+        return found({ id: 601, kind: "bot", username: "botlike", display_name: "Bot Like", is_bot: true });
       }
       if (body.target === "humank") {
-        return { id: 602, kind: "user", username: "humank", display_name: "Human", is_bot: false };
+        return found({ id: 602, kind: "user", username: "humank", display_name: "Human", is_bot: false });
       }
       throw new Error("unexpected target: " + body.target);
     }),
@@ -430,7 +434,7 @@ function makeService(respond) {
       ...twoHandles(),
       service: failing([
         { status: 500, body: "upstream exploded" },
-        { status: 200, json: { id: 7, kind: "user", username: "beta_two", display_name: "Beta" } },
+        { status: 200, json: { found: true, target: "beta_two", info: { id: 7, kind: "user", username: "beta_two", display_name: "Beta" } } },
       ]),
     };
     const res = await resolvePlugin.run(ctx);
@@ -455,6 +459,22 @@ function makeService(respond) {
 
   // 4. THE NEGATIVE. An honest empty answer must stay a success — otherwise the fix trades a
   //    silent failure for a false alarm, which is the worse of the two.
+  {
+    // The bug report this pins: tgpeek used to answer a handle with no account with the SAME
+    // HTTP 400 a malformed request gets, so this ran the resolvePlugin's error path and the run
+    // came back red for correctly finding out an account does not exist. Now the gateway answers
+    // 200 + found:false (see tgpeek/gateway/server.py handle_resolve), same idiom as phone-lookup.
+    const noAccount = failing([{ status: 200, json: { found: false, target: 'ghosthandle', info: null } }]);
+    const ctx = {
+      input: { selection: ['h1'] },
+      graph: makeGraph({ h1: { id: 'h1', type: 'identity.handle', data: { handle: 'ghosthandle' } } }, [], [], []),
+      service: noAccount,
+    };
+    const res = await resolvePlugin.run(ctx);
+    check('resolve no-account: NOT a failure', !!res && res.counts.errors === 0);
+    check('resolve no-account: counted as not_found, not skipped', res.counts.not_found === 1 && res.counts.skipped === 0);
+    check('resolve no-account: nothing created', res.counts.collected === 0);
+  }
   {
     const nothing = failing([{ status: 200, json: { found: false } }]);
     const ctx = {
