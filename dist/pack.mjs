@@ -232,7 +232,12 @@ function requireService(ctx) {
 // node is given, link it as evidence (links to). info is an EntityInfo or
 // InviteInfo dict (flat, as returned by the gateway). ``source`` is "invite"
 // for invite-link flows (groups get invite_hash) or "public" otherwise.
-async function ensureChat(ctx, sourceNodeId, url, info, source = "public") {
+//
+// ``label`` overrides the edge wording, and exists for one caller: resolving an
+// identity.handle. "links to" is evidence wording for a URL that mentions a chat,
+// and it is wrong for a handle — see the resolve plugin for why the difference
+// matters enough to be a parameter.
+async function ensureChat(ctx, sourceNodeId, url, info, source = "public", label = "links to") {
   const type = kindToType(info.kind);
   if (!type) return null;
   const key = info.id != null ? `telegram:${type}:${info.id}` : undefined;
@@ -242,7 +247,7 @@ async function ensureChat(ctx, sourceNodeId, url, info, source = "public") {
     key,
   });
   if (sourceNodeId) {
-    await ctx.graph.createEdge({ from: sourceNodeId, to: chat.id, label: "links to" });
+    await ctx.graph.createEdge({ from: sourceNodeId, to: chat.id, label });
   }
   return chat;
 }
@@ -471,11 +476,29 @@ const resolvePlugin = {
           await ctx.graph.updateNode(node.id, merged);
           counts.collected++;
         } else {
-          const chat = await ensureChat(ctx, node.id, url, info, "public");
+          // NOT "same as", and this is the whole point of the label parameter.
+          //
+          // An identity.handle node is a STRING, not a person, and it is a hub: every account
+          // anywhere that uses that string hangs off the same node (node identity is type+label).
+          // Telegram also RECYCLES usernames — a handle released by one account can be claimed by
+          // an unrelated one. So "the handle t.me/x resolves to profile P" says only who holds it
+          // NOW, and writing that as `same as` asserted something much larger: that the handle and
+          // whoever currently answers to it are one entity.
+          //
+          // Measured consequence, from a real case file: a handle confirmed to belong to the
+          // subject was ALSO claimed on Telegram by a stranger. This edge put the stranger three
+          // hops from the subject's person node, and it survived the adversarial auto-apply check —
+          // correctly, because at the string level the claim IS true. What was wrong was the claim,
+          // not the checking. A label the verifier can only read as an identity assertion will be
+          // supported whenever the strings match, which is exactly when it is most misleading.
+          //
+          // It was also a DUPLICATE: ensureChat had already drawn handle -> chat, so this added a
+          // second, opposite-direction edge between the same pair.
+          const chat = await ensureChat(
+            ctx, node.id, url, info, "public",
+            node.type === "identity.handle" ? "currently resolves to" : "links to",
+          );
           if (!chat) { counts.skipped++; continue; }
-          if (node.type === "identity.handle") {
-            await ctx.graph.createEdge({ from: chat.id, to: node.id, label: "same as" });
-          }
           counts.collected++;
         }
       } catch (e) {
