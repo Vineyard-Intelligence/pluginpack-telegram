@@ -380,9 +380,9 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    version: "2.2.0",
+    version: "2.3.0",
     description:
-      "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op.",
+      "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op. A handle with no Telegram account is reported as a normal result (no_account), not a failure.",
     icon: "user-search",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
@@ -410,7 +410,7 @@ const resolvePlugin = {
     lifecycle: { persistence: "opt-in", controls: ["progress", "cancel"], progress: "determinate" },
   },
   async run(ctx) {
-    const counts = { processed: 0, collected: 0, skipped: 0, errors: 0 };
+    const counts = { processed: 0, collected: 0, not_found: 0, skipped: 0, errors: 0 };
     const state = {};
     requireService(ctx);
     const nodes = await collectSelection(ctx);
@@ -455,7 +455,15 @@ const resolvePlugin = {
       });
       counts.processed++;
       try {
-        const info = await postJson(ctx, "/resolve", { target });
+        // found:false means the gateway asked Telegram and the answer was no — a normal negative
+        // result, not a failure. Before this, tgpeek's /resolve answered a nonexistent handle
+        // with the same HTTP 400 a malformed request gets, and postJson turned that into a thrown
+        // ServiceError caught right below — so "checked and it has no account" and "the gateway
+        // choked" both counted as counts.errors, and a run that only hit missing handles ended up
+        // in the RED, FAILED bucket (see the `finish` comment above this plugin) for finding
+        // exactly what it was asked to find out.
+        const { found, info } = await postJson(ctx, "/resolve", { target });
+        if (!found) { counts.not_found++; continue; }
         if (mode === "update") {
           const type = kindToType(info.kind);
           if (!type || type !== node.type) { counts.skipped++; continue; } // resolved to a different kind — stale node
@@ -475,7 +483,7 @@ const resolvePlugin = {
       }
     }
     return finish(
-      `Resolved ${counts.collected} handle(s); ${counts.skipped} skipped, ${counts.errors} error(s)`,
+      `Resolved ${counts.collected} handle(s); ${counts.not_found} no account, ${counts.skipped} skipped, ${counts.errors} error(s)`,
       counts,
       state.firstError,
     );
@@ -779,7 +787,7 @@ const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
   content_type: "vineyard:pluginpack",
   name: "Telegram",
-  version: "2.2.0",
+  version: "2.3.0",
   description:
     "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
