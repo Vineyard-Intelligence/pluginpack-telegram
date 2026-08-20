@@ -385,7 +385,11 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    version: "2.3.0",
+    // Bumped with the two behaviour changes this description already documents: a handle with no
+    // account is a result rather than a failure, and a handle resolves to its current holder rather
+    // than being 'same as' them. plugins/telegram.manifest.json carries the same number per member,
+    // and the registry compares them member by member — not just at the pack level.
+    version: "2.4.0",
     description:
       "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op. A handle with no Telegram account is reported as a normal result (no_account), not a failure.",
     icon: "user-search",
