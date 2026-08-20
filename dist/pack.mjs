@@ -810,7 +810,11 @@ const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
   content_type: "vineyard:pluginpack",
   name: "Telegram",
-  version: "2.3.0",
+  // Keep in step with plugins/telegram.manifest.json. Unlike the generated packs, this file is
+  // hand-authored source rather than esbuild output, so nothing regenerates this number when the
+  // manifest is bumped — it sat at 2.3.0 through the two telegram_resolve commits that shipped as
+  // 2.4.0, and the registry now fails the pack when the two disagree (verify_pinned.bundle_mismatch).
+  version: "2.4.0",
   description:
     "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
