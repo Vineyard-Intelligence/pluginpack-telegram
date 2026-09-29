@@ -389,7 +389,7 @@ const resolvePlugin = {
     // account is a result rather than a failure, and a handle resolves to its current holder rather
     // than being 'same as' them. plugins/telegram.manifest.json carries the same number per member,
     // and the registry compares them member by member — not just at the pack level.
-    version: "2.4.0",
+    version: "2.4.1",
     description:
       "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op. A handle with no Telegram account is reported as a normal result (no_account), not a failure.",
     icon: "user-search",
@@ -489,7 +489,7 @@ const resolvePlugin = {
           // NOW, and writing that as `same as` asserted something much larger: that the handle and
           // whoever currently answers to it are one entity.
           //
-          // Measured consequence, from a real case file: a handle confirmed to belong to the
+          // Measured consequence, from a real project file: a handle confirmed to belong to the
           // subject was ALSO claimed on Telegram by a stranger. This edge put the stranger three
           // hops from the subject's person node, and it survived the adversarial auto-apply check —
           // correctly, because at the string level the claim IS true. What was wrong was the claim,
@@ -818,7 +818,7 @@ const packManifest = {
   // hand-authored source rather than esbuild output, so nothing regenerates this number when the
   // manifest is bumped — it sat at 2.3.0 through the two telegram_resolve commits that shipped as
   // 2.4.0, and the registry now fails the pack when the two disagree (verify_pinned.bundle_mismatch).
-  version: "2.4.0",
+  version: "2.4.1",
   description:
     "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
