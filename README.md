@@ -23,14 +23,14 @@ Telegram Invite Link (초대 URL): 분석 ──▶ peek 가능하면 Telegram P
 Telegram Phone Lookup (identity.phone_number 노드) ──▶ telegram.user + same as
 ```
 
-- 모든 그래프 쓰기는 **스테이징**(capture:true) → analyst 리뷰 → 커밋
+- 모든 그래프 쓰기는 **스테이징** → analyst 리뷰 → 커밋
 - 노드 생성은 `key`(예: `telegram:telegram.channel:<id>`)로 중복 생성 방지
 - `username`은 대표 핸들 하나, `usernames`엔 활성 상태인 전체 핸들이 줄바꿈으로 들어감 —
   텔레그램의 컬렉터블/복수 유저네임 계정은 대표 핸들 외에 여러 개를 더 가질 수 있음 (tgpeek 0.3.0+ 필요)
 - 비텔레그램 URL / 타입 불일치 입력은 **no-op** (아무것도 생성·수정하지 않음)
 - "login"은 플러그인 범위 밖 — 세션은 게이트웨이 운영자가 `tgpeek login`으로 관리
 - 용어: 텔레그램 표준 용어인 **participant**만 사용 (그래프 엣지 `participant_of`/`admin_of`)
-- **Phone Lookup**: `contacts.resolvePhone` 기반 — 번호가 미가입이거나 상대가 전화번호 조회를 숨겼으면 결과 없음(설계상 구분 불가). 게이트웨이가 1시간 캐시를 적용하고 동일 번호 동시 조회는 1회로 합칩니다. 텔레그램이 권고하는 3초 간격은 강제 사항이 아니라 기본 꺼짐(실제 제한은 FLOOD_WAIT이고 Telethon이 처리).
+- **Phone Lookup**: 번호가 미가입이거나 상대가 전화번호 조회를 숨겼으면 결과 없음(둘은 구분 불가). 게이트웨이가 1시간 캐시를 적용하고 동일 번호 동시 조회는 1회로 합칩니다.
 
 ## 파라미터
 
@@ -45,39 +45,19 @@ Telegram Phone Lookup (identity.phone_number 노드) ──▶ telegram.user + s
 
 `telegram_resolve`/`telegram_invite_link`/`telegram_phone_lookup`은 파라미터가 없습니다.
 
-**2.2.0에서 `posts_limit`/`participants_limit` 설정이 사라졌습니다.** 두 키가 든 config 블록
-하나를 posts와 participants가 그대로 공유하고 있어서, Posts가 참가자 수 노브를 노출하고
-Participants가 포스트 노브를 노출했으며, 각자 요청에 상대방 필드까지 실어 보냈습니다. 이제
-각 플러그인이 `limit` 하나만 받고, 게이트웨이가 읽는 이름(`/posts`는 `limit`, `/participants`는
-`participants_limit`)으로 플러그인 안에서 바꿔 보냅니다.
-
-**2.0.0에서 `gateway_token`이 사라졌습니다.** 분석가가 공용 서버 비밀을 들고 있을 이유가 없어졌습니다 —
-아래를 보십시오.
+**2.2.0에서 `posts_limit`/`participants_limit` 설정이 사라졌습니다** — 각 플러그인의 `limit`
+파라미터를 쓰십시오.
 
 ## 게이트웨이는 `ctx.service`로 부릅니다 (2.0.0)
 
-이 팩은 **주소를 모릅니다.** `scopes.network`도 `gateway_token`도 없고, 대신
-`scopes.services: ["telegram"]` 하나를 선언합니다.
+이 팩은 게이트웨이 주소도 토큰도 설정하지 않습니다. `scopes.services: ["telegram"]`을 선언하고
+앱이 분석가의 Vineyard 로그인으로 호출합니다.
 
 ```js
 await ctx.service("telegram", "resolve", { method: "POST", body: JSON.stringify({ target }) });
 ```
 
-일어나는 일:
-
-1. 호스트가 `SERVICES` 테이블에서 주소를 꺼내고 **분석가의 Vineyard 토큰**을 붙입니다. 팩은 목적지도
-   자격증명도 표현할 수 없습니다 — 그게 이 호출에 신원을 실어도 되는 이유입니다.
-2. auxiliary 게이트웨이가 그 토큰을 `api.vineyard.run`에 인트로스펙션합니다. 실패하면 **401**이
-   그대로 돌아옵니다(세션 만료), 플랜/권한 문제면 **403**.
-3. 인증이 끝난 뒤에야 게이트웨이가 `Authorization`을 **tgpeek의 베어러 토큰으로 교체**합니다.
-   분석가의 토큰은 게이트웨이에서 멈추고 tgpeek까지 가지 않습니다.
-
-그래서 예전에 분석가마다 하나씩 들고 있던 게이트웨이 토큰은 이제 **서버 한 곳**에만 있습니다.
-팩이 토큰을 보내려 해도 게이트웨이가 덮어쓰므로, 되돌리는 건 순수한 다운그레이드입니다.
-
-**어느 팩이 이 서비스를 쓸 수 있는지는 앱이 정합니다** — 호스트 브리지의 서비스 테이블에
-`run.vineyard.pluginpacks.telegram`이 명시돼 있습니다. tgpeek은 운영자의 전화번호 인증 계정으로
-돌기 때문에, "분석가가 회원인가"와는 별개의 질문입니다.
+세션이 만료되면 **401**, 플랜/권한 문제면 **403**이 돌아옵니다.
 
 ### 1.x 에서 올라오는 경우
 
@@ -86,45 +66,19 @@ await ctx.service("telegram", "resolve", { method: "POST", body: JSON.stringify(
 
 ## 실패는 실패로 끝납니다 (2.1.0)
 
-2.0.0까지는 모든 플러그인이 항목별 오류를 **잡아서 세고 그냥 반환**했습니다. 호스트는 반환된
-결과를 언제나 초록색 "succeeded"로 그리고, 스테이징된 변경이 없으면 요약문 대신 "No changes"를
-띄웁니다. 그래서 **게이트웨이가 죽은 것과 텔레그램 계정이 없는 핸들이 화면에서 똑같이 보였습니다.**
-
-2.1.0의 규칙:
-
 | 상황 | 결과 |
 |---|---|
 | 하나도 못 가져왔는데 오류가 있음 | **실패** — 첫 오류 메시지가 그대로 실행 행에 빨간색으로 |
 | 일부 성공, 일부 실패 | 성공 — 단, 요약에 `— first error: …`로 실제 메시지가 붙음 |
-| 401 / 403 | **즉시 중단** — 죽은 세션은 나머지 49개 노드에도 죽어 있음 |
-| 결과가 없을 뿐 오류는 없음 | 성공 (`skipped`) — 조용한 실패를 잡느라 오탐을 만들지 않습니다 |
+| 401 / 403 | **즉시 중단** — 죽은 세션은 나머지 노드에도 죽어 있음 |
+| 결과가 없을 뿐 오류는 없음 | 성공 (`skipped`) |
 | `ctx.service` 자체가 없음 | 실패 — 빈 결과가 아니라 망가진 설치입니다 |
-
-항목별로 잡는 것 자체는 그대로입니다. 핸들 하나가 안 된다고 나머지 마흔아홉을 버리지는 않습니다.
-바뀐 것은 **끝내는 방식**입니다.
 
 ## 서버 쪽 요구사항
 
-`auxiliary.vineyard.run`의 `/telegram/*` 라우트가 tgpeek 게이트웨이로 갑니다(프리픽스는 Traefik이
-벗겨서 전달 — 게이트웨이는 `/search`, `/phone-lookup` 처럼 루트에서 서빙). 인증 체인과 CORS는
-게이트웨이가 담당하므로 팩 쪽에서 신경 쓸 것이 없습니다: `auxiliary/data/traefik_configs/dynamic/`의
-`mw_aux_chain_tgpeek` 참조.
-
-세션은 사전에 `tgpeek login`으로 만들어 둡니다(게이트웨이 자체는 재로그인하지 않음).
-
-프록시/게이트웨이가 응답해야 하는 것:
-
-- **CORS** — Traefik의 `mw_cors`가 체인 맨 앞에서 처리합니다. 프리플라이트는 인증 앞에 서 있어야
-  합니다: 프리플라이트에는 자격증명이 실리지 않으므로 forwardAuth 뒤에 두면 401로 끝나고 실제
-  요청이 아예 발생하지 않습니다.
-- **HTTPS** — 앱이 https이므로 http 엔드포인트는 mixed content로 차단됩니다.
-
-루프백을 쓰던 시절 필요했던 Chrome의 Private Network Access 처리
-(`Access-Control-Allow-Private-Network`)는 **더 이상 해당 없습니다** — 공개 https 오리진끼리의
-요청이라 PNA 검사 대상이 아닙니다. 게이트웨이가 그 헤더를 계속 보내도 무해합니다.
-
-덤으로, 공개 https 엔드포인트가 되면서 **웹 빌드에서도 동작합니다** — 루프백 주소는 배포된 웹
-앱에서 사실상 쓸 수 없었으므로, 이전에는 데스크탑 전용에 가까웠습니다.
+게이트웨이 세션은 운영자가 사전에 `tgpeek login`으로 만들어 둡니다(게이트웨이 자체는 재로그인하지
+않음). 게이트웨이가 공개 https 엔드포인트(`auxiliary.vineyard.run`)이므로 웹 앱과 데스크탑 앱
+모두에서 동작합니다.
 
 ## 개발 테스트
 
@@ -132,7 +86,6 @@ await ctx.service("telegram", "resolve", { method: "POST", body: JSON.stringify(
 # 번들 기능 테스트
 node test-plugin.mjs
 # => PASS 216 / 216 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
-# jsc 셸로는 더 이상 돌지 않습니다 — test-plugin.mjs 가 node:fs 로 번들을 읽습니다.
 ```
 
 `test-plugin.mjs`는 가짜 `ctx`(graph/net)로 여섯 플러그인의 `run()`을 호출해
@@ -140,8 +93,6 @@ node test-plugin.mjs
 
 ## 배포
 
-`publish-packs.sh pluginpack-telegram` → 출력된 커밋 SHA를
-`registry/registry/community-pluginpacks.json`에 고정 후 registry CI 검증.
 `typepack-telegram`(telegram.user/channel/group/post 타입, `participant_of` 등 엣지)도 함께 배포해야 합니다.
 
 ## 라이선스
