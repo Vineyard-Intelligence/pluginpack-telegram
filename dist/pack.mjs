@@ -325,9 +325,9 @@ const searchPlugin = {
     identifier: "run.vineyard.plugins.telegram_search",
     content_type: "vineyard:plugin",
     name: "Telegram Search",
-    version: "2.2.0",
+    version: "2.2.1",
     description:
-      "Global launch (no selection needed): runs a keyword search against Telegram (the same contacts.search the apps use) via the tgpeek gateway and materializes the results as telegram.user / telegram.channel / telegram.group nodes.",
+      "Searches Telegram by keyword from a query in the Run dialog (no selection) and creates telegram.user, telegram.channel and telegram.group nodes for the results (default 20, max 50).",
     icon: "search",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
@@ -389,9 +389,9 @@ const resolvePlugin = {
     // account is a result rather than a failure, and a handle resolves to its current holder rather
     // than being 'same as' them. plugins/telegram.manifest.json carries the same number per member,
     // and the registry compares them member by member — not just at the pack level.
-    version: "2.4.1",
+    version: "2.4.2",
     description:
-      "Resolves a known Telegram handle to its full profile via the tgpeek gateway (bio/about, participant count, flags). Inputs: a web.url t.me handle link (t.me/<username>, t.me/s/<username> — node created with a links-to evidence edge), an existing telegram.user / telegram.channel / telegram.group node (enriched in place by its username/usernames), or an identity.handle node (node created with a same-as edge). Invite links, non-Telegram URLs and handles without a username are a no-op. A handle with no Telegram account is reported as a normal result (no_account), not a failure.",
+      "Resolves Telegram usernames to profiles (bio/about, participant count, flags). From selected web.url t.me handle links and identity.handle nodes it creates the telegram.user/channel/group node with a \"links to\" or \"currently resolves to\" edge respectively; selected telegram.user/channel/group nodes are updated in place. Invite links and non-Telegram inputs are skipped; a handle with no account counts as not_found, not an error.",
     icon: "user-search",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
@@ -523,9 +523,9 @@ const inviteLinkPlugin = {
     identifier: "run.vineyard.plugins.telegram_invite_link",
     content_type: "vineyard:plugin",
     name: "Telegram Invite Link",
-    version: "2.2.0",
+    version: "2.2.1",
     description:
-      "For each selected web.url node that is an invite link (t.me/+hash, t.me/joinchat/..., tg://join), analyzes it via the tgpeek gateway: creates the telegram.channel / telegram.group node (invite_hash for groups, peek/expires when the server grants temporary read access). Handle links and non-Telegram URLs are a no-op. Analysis only — reading posts of an invite link is Telegram Posts' job (best-effort peek).",
+      "Analyzes each selected web.url invite link (t.me/+…, t.me/joinchat/…, tg://join) without joining and creates the telegram.channel or telegram.group node with a \"links to\" edge, filling invite_hash for groups and peek/expires when temporary read access is granted. Does not collect posts.",
     icon: "link",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
@@ -587,9 +587,9 @@ const postsPlugin = {
     identifier: "run.vineyard.plugins.telegram_posts",
     content_type: "vineyard:plugin",
     name: "Telegram Posts",
-    version: "2.2.0",
+    version: "2.2.1",
     description:
-      "Post list without joining. Inputs: a web.url invite link (best-effort peek via the gateway — posts only when the server grants temporary read access; the chat node is created with a links-to evidence edge) or existing telegram.channel / telegram.group nodes (target = username or numeric id). Stages telegram.post nodes with posted in / replied to edges.",
+      "Collects posts without joining from selected telegram.channel/telegram.group nodes or web.url invite links (invite links only when temporary read access is granted; the chat node is created with a \"links to\" edge). Creates telegram.post nodes with \"posted in\" and \"replied to\" edges; the limit param caps posts per chat (blank = all).",
     icon: "list",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
@@ -678,9 +678,9 @@ const participantsPlugin = {
     identifier: "run.vineyard.plugins.telegram_participants",
     content_type: "vineyard:plugin",
     name: "Telegram Participants",
-    version: "2.2.0",
+    version: "2.2.1",
     description:
-      "For each selected telegram.group node, pulls the no-join participant list of the public supergroup from the tgpeek gateway and stages telegram.user nodes with participant of / admin of edges. Only public supergroups expose participants; the gateway rejects invite links and channels.",
+      "Collects the participant list of each selected telegram.group without joining and creates telegram.user nodes with \"participant of\" edges, plus \"admin of\" for admins and the creator. Public supergroups only; the limit param caps participants per group (blank = all).",
     icon: "users",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
@@ -746,9 +746,9 @@ const phoneLookupPlugin = {
     identifier: "run.vineyard.plugins.telegram_phone_lookup",
     content_type: "vineyard:plugin",
     name: "Telegram Phone Lookup",
-    version: "2.2.0",
+    version: "2.2.1",
     description:
-      "For each selected identity.phone_number node, resolves the number via the tgpeek gateway (contacts.resolvePhone — the same method t.me/+<number> deep links use) and creates the telegram.user node when the number has a Telegram account whose privacy settings allow phone lookup, plus a same-as edge from the user to the phone number node. Numbers with no account, or hidden from phone lookup, produce nothing. The gateway caches results for 1 hour and collapses concurrent lookups of one number into a single request.",
+      "Looks up each selected identity.phone_number on Telegram and, when the number has an account that allows phone lookup, creates the telegram.user node with a \"same as\" edge to the number. Numbers with no account or with lookup hidden produce nothing.",
     icon: "phone",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
@@ -818,9 +818,9 @@ const packManifest = {
   // hand-authored source rather than esbuild output, so nothing regenerates this number when the
   // manifest is bumped — it sat at 2.3.0 through the two telegram_resolve commits that shipped as
   // 2.4.0, and the registry now fails the pack when the two disagree (verify_pinned.bundle_mismatch).
-  version: "2.4.1",
+  version: "2.4.2",
   description:
-    "Telegram read-only reconnaissance via the tgpeek gateway (no joining): keyword search, handle resolution, invite-link analysis/collection, granular post / participant collection, and phone-number lookup. The plugins mirror the gateway endpoints 1:1 so the AI agent and the analyst can run exactly the operation they need. Materialized as telegram.* nodes with source URLs linked as evidence.",
+    "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
 };
 
