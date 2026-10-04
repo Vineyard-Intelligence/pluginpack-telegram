@@ -115,7 +115,7 @@ function makeService(respond) {
       u2: { id: "u2", type: "web.url", data: { url: "https://t.me/+AbCdEfGh" } },
       u3: { id: "u3", type: "web.url", data: { url: "https://example.com/x" } },
       u4: { id: "u4", type: "web.url", data: { url: "https://t.me/s/HanaResearch" } },
-      tg1: { id: "tg1", type: "telegram.user", data: { telegram_id: 500, username: "lightuser" } },
+      tg1: { id: "tg1", type: "telegram.user", data: { telegram_id: 500, username: "lightuser", bio: "stale bio", notes: "analyst note" } },
       hd1: { id: "hd1", type: "identity.handle", data: { handle: "@somehandle" } },
       hd2: { id: "hd2", type: "identity.handle", data: { handle: "not a handle!!" } },
     }, createdNodes, createdEdges, updatedNodes),
@@ -162,7 +162,11 @@ function makeService(respond) {
 
   const upd = updatedNodes.find(u => u.id === "tg1");
   check("resolve: telegram.* 입력 → updateNode in-place", !!upd);
-  check("resolve: updateNode에 bio 채움 (기존 필드 보존)", upd && upd.data.bio === "full bio" && upd.data.telegram_id === 500);
+  check("resolve: updateNode 델타에 새 bio", upd && upd.data.bio === "full bio" && upd.data.telegram_id === 500);
+  // The host fill-merges updateNode onto the node as it is at commit, so the plugin must send only
+  // what it looked up. Re-sending a field the lookup does not produce overwrites another run's
+  // write to it with the value from when this run started.
+  check("resolve: updateNode는 조회한 필드만 (기존 무관 필드 재전송 안 함)", upd && !("notes" in upd.data));
 
   const hdChat = createdNodes.find(n => n.type === "telegram.user" && n.data.username === "somehandle");
   check("resolve: identity.handle → user 노드 생성", !!hdChat);

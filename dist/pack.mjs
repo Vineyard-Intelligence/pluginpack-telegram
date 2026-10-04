@@ -385,11 +385,10 @@ const resolvePlugin = {
     identifier: "run.vineyard.plugins.telegram_resolve",
     content_type: "vineyard:plugin",
     name: "Telegram Resolve",
-    // Bumped with the two behaviour changes this description already documents: a handle with no
-    // account is a result rather than a failure, and a handle resolves to its current holder rather
-    // than being 'same as' them. plugins/telegram.manifest.json carries the same number per member,
-    // and the registry compares them member by member — not just at the pack level.
-    version: "2.4.2",
+    // Bumped whenever this plugin's behaviour changes. plugins/telegram.manifest.json carries the
+    // same number per member, and the registry compares them member by member — not just at the
+    // pack level.
+    version: "2.4.3",
     description:
       "Resolves Telegram usernames to profiles (bio/about, participant count, flags). From selected web.url t.me handle links and identity.handle nodes it creates the telegram.user/channel/group node with a \"links to\" or \"currently resolves to\" edge respectively; selected telegram.user/channel/group nodes are updated in place. Invite links and non-Telegram inputs are skipped; a handle with no account counts as not_found, not an error.",
     icon: "user-search",
@@ -476,8 +475,11 @@ const resolvePlugin = {
         if (mode === "update") {
           const type = kindToType(info.kind);
           if (!type || type !== node.type) { counts.skipped++; continue; } // resolved to a different kind — stale node
-          const merged = { ...(node.data || {}), ...chatData(type, info, "public", undefined) };
-          await ctx.graph.updateNode(node.id, merged);
+          // Only the fields this lookup filled. The host fill-merges an update onto the node as it
+          // is at commit, so spreading node.data in here re-sent every field as it stood when the
+          // run started and overwrote whatever another run had written since. Blank values in the
+          // delta are skipped by that merge, so a field Telegram did not return is left alone.
+          await ctx.graph.updateNode(node.id, chatData(type, info, "public", undefined));
           counts.collected++;
         } else {
           // NOT "same as", and this is the whole point of the label parameter.
@@ -818,7 +820,7 @@ const packManifest = {
   // hand-authored source rather than esbuild output, so nothing regenerates this number when the
   // manifest is bumped — it sat at 2.3.0 through the two telegram_resolve commits that shipped as
   // 2.4.0, and the registry now fails the pack when the two disagree (verify_pinned.bundle_mismatch).
-  version: "2.4.2",
+  version: "2.4.3",
   description:
     "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
