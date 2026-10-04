@@ -2,7 +2,7 @@
   "identifier": "run.vineyard.pluginpacks.telegram",
   "content_type": "vineyard:pluginpack",
   "name": "Telegram",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "description": "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
   "author": {
     "name": "VINEYARD",
@@ -99,7 +99,7 @@
       "identifier": "run.vineyard.plugins.telegram_resolve",
       "content_type": "vineyard:plugin",
       "name": "Telegram Resolve",
-      "version": "2.4.2",
+      "version": "2.4.3",
       "description": "Resolves Telegram usernames to profiles (bio/about, participant count, flags). From selected web.url t.me handle links and identity.handle nodes it creates the telegram.user/channel/group node with a \"links to\" or \"currently resolves to\" edge respectively; selected telegram.user/channel/group nodes are updated in place. Invite links and non-Telegram inputs are skipped; a handle with no account counts as not_found, not an error.",
       "icon": "user-search",
       "platforms": {
