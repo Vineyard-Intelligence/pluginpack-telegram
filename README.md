@@ -45,10 +45,7 @@ Telegram Phone Lookup (identity.phone_number 노드) ──▶ telegram.user + s
 
 `telegram_resolve`/`telegram_invite_link`/`telegram_phone_lookup`은 파라미터가 없습니다.
 
-**2.2.0에서 `posts_limit`/`participants_limit` 설정이 사라졌습니다** — 각 플러그인의 `limit`
-파라미터를 쓰십시오.
-
-## 게이트웨이는 `ctx.service`로 부릅니다 (2.0.0)
+## 게이트웨이는 `ctx.service`로 부릅니다
 
 이 팩은 게이트웨이 주소도 토큰도 설정하지 않습니다. `scopes.services: ["telegram"]`을 선언하고
 앱이 분석가의 Vineyard 로그인으로 호출합니다.
@@ -59,12 +56,7 @@ await ctx.service("telegram", "resolve", { method: "POST", body: JSON.stringify(
 
 세션이 만료되면 **401**, 플랜/권한 문제면 **403**이 돌아옵니다.
 
-### 1.x 에서 올라오는 경우
-
-`gateway_token` 설정값은 **버려도 됩니다**. 남아 있어도 팩이 읽지 않습니다. 설치 화면의
-권한 표시도 바뀝니다 — 엔드포인트 URL과 "Secret config" 대신 **`Vineyard telegram`** 한 줄입니다.
-
-## 실패는 실패로 끝납니다 (2.1.0)
+## 실패는 실패로 끝납니다
 
 | 상황 | 결과 |
 |---|---|
@@ -85,10 +77,10 @@ await ctx.service("telegram", "resolve", { method: "POST", body: JSON.stringify(
 ```bash
 # 번들 기능 테스트
 node test-plugin.mjs
-# => PASS 216 / 216 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
+# => PASS 203 / 203 (search / resolve / invite_link 분석 / posts / participants / phone_lookup)
 ```
 
-`test-plugin.mjs`는 가짜 `ctx`(graph/net)로 여섯 플러그인의 `run()`을 호출해
+`test-plugin.mjs`는 가짜 `ctx`(graph/service)로 여섯 플러그인의 `run()`을 호출해
 가드·게이트웨이 페이로드·노드/엣지 스테이징·증거 체인·no-op 규칙을 검증합니다.
 
 ## 배포

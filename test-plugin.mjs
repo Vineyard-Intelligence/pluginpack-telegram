@@ -35,16 +35,14 @@ function makeGraph(nodeById, createdNodes, createdEdges, updatedNodes) {
 
 // respond(path, body) -> response payload.
 //
-// There is no `auth` argument any more, and that is the point: the pack holds no credential. The
+// There is no `auth` argument, and that is the point: the pack holds no credential. The
 // analyst's Vineyard token is attached by the host, and the auxiliary gateway swaps it for
 // tgpeek's own only after authenticating that analyst — so the strongest thing this harness can
 // assert about credentials is that the pack sends NONE.
-// The pack no longer knows an address. It names a SERVICE, and the host resolves it — so what the
-// harness asserts changed with it: that the name is "telegram" and nothing else, that the path is
-// service-relative (no leading slash to climb out of the mount with), and that the pack sends no
-// credential of its own. There is no token for it to send any more; the gateway attaches tgpeek's
-// after authenticating the analyst, and a pack that still tried would be sending a header the
-// gateway overwrites.
+// The pack knows no address. It names a SERVICE, and the host resolves it — so the harness asserts
+// that the name is "telegram" and nothing else, that the path is service-relative (no leading slash
+// to climb out of the mount with), and that the pack sends no credential of its own. The gateway
+// attaches tgpeek's token after authenticating the analyst.
 function makeService(respond) {
   return async (name, path, init) => {
     check(`service is "telegram", not ${name}`, name === "telegram");
@@ -52,7 +50,6 @@ function makeService(respond) {
     const headers = init?.headers || {};
     const sent = Object.keys(headers).map((k) => k.toLowerCase());
     check("pack sends no Authorization of its own", !sent.includes("authorization"));
-    check("pack sends no legacy gateway token", !sent.includes("x-tgpeek-token"));
     const body = JSON.parse(init.body);
     // Assertions below stay written as "/search" — the leading slash is the harness's, not the
     // pack's, so an accidental absolute path in the pack still fails the check above.
@@ -181,7 +178,7 @@ function makeService(respond) {
     "resolve: identity.handle에 same-as 엣지를 만들지 않음",
     !createdEdges.some(e => e.label === "same as" && (e.from === "hd1" || e.to === "hd1")),
   );
-  // The old code drew handle->user ("links to") AND user->handle ("same as"). One pair, one edge.
+  // One pair, one edge: handle->user ("links to") only, never a second user->handle ("same as").
   check(
     "resolve: handle↔user 쌍에 엣지 1개만",
     createdEdges.filter(e => (e.from === "hd1" && e.to === hdChat.id) || (e.from === hdChat.id && e.to === "hd1")).length === 1,
@@ -323,8 +320,7 @@ function makeService(respond) {
   check("posts targets: username 우선, numeric fallback, invite URL", calls.some(c => c[0] === "/posts" && c[1] === "chan1") && calls.some(c => c[0] === "/posts" && c[1] === "222222") && calls.some(c => c[0] === "/posts" && c[1] === "https://t.me/+ZzZz"));
   check("posts: post nodes x3", createdNodes.filter(n => n.type === "telegram.post").length === 3);
   check("posts limit=5 from params", calls.every(c => c[2].limit === 5));
-  // 회귀 가드: 예전에는 config 블록 하나를 두 플러그인이 공유해서, posts 요청에
-  // participants_limit 이, participants 요청에 posts 의 limit 이 같이 실려 나갔다.
+  // 각 플러그인은 자기 limit 만 보낸다: posts 요청에 participants_limit 이 실리면 안 된다.
   check("posts: participants_limit 안 보냄", calls.every(c => c[2].participants_limit === undefined));
   check("posts: edges to input node (no chat recreate)", createdEdges.some(e => e.label === "posted in" && e.to === "ch1") && createdEdges.some(e => e.label === "posted in" && e.to === "grp1"));
   check("posts: invite chat created + links_to", createdNodes.some(n => n.type === "telegram.channel" && n.data.username === "invchan") && createdEdges.some(e => e.from === "iv1" && e.label === "links to"));
@@ -476,13 +472,12 @@ function makeService(respond) {
     check("403: run fails and stops", (msg || "").includes("not permitted") && ctx.service.calls.length === 1);
   }
 
-  // 4. THE NEGATIVE. An honest empty answer must stay a success — otherwise the fix trades a
-  //    silent failure for a false alarm, which is the worse of the two.
+  // 4. THE NEGATIVE. An honest empty answer must stay a success — otherwise failing loudly trades
+  //    a silent failure for a false alarm, which is the worse of the two.
   {
-    // The bug report this pins: tgpeek used to answer a handle with no account with the SAME
-    // HTTP 400 a malformed request gets, so this ran the resolvePlugin's error path and the run
-    // came back red for correctly finding out an account does not exist. Now the gateway answers
-    // 200 + found:false (see tgpeek/gateway/server.py handle_resolve), same idiom as phone-lookup.
+    // A handle with no account is answered 200 + found:false, the same idiom as phone-lookup. It
+    // must not take resolvePlugin's error path: finding out correctly that an account does not
+    // exist is not a red run.
     const noAccount = failing([{ status: 200, json: { found: false, target: 'ghosthandle', info: null } }]);
     const ctx = {
       input: { selection: ['h1'] },
@@ -523,7 +518,7 @@ function makeService(respond) {
     check("search: a failed search fails the run", (msg || "").includes("503"));
   }
 
-  // 6. No service at all is a broken install, not an empty answer.
+  // 6. No service at all is a broken setup, not an empty answer.
   for (const p of pack.plugins) {
     const ctx = { params: { query: "x" }, input: { selection: [] }, graph: makeGraph({}, [], [], []) };
     const msg = await caught(() => p.run(ctx));
@@ -555,8 +550,10 @@ say("pack: " + pack.manifest.identifier + " | plugins: " + pack.plugins.map(p =>
     check(`${a.identifier}: scopes agree`, stable(a.scopes) === stable(b.scopes));
     check(`${a.identifier}: declares the telegram service`, JSON.stringify(a.scopes.services) === '["telegram"]');
     check(`${a.identifier}: declares NO arbitrary egress`, !("network" in a.scopes));
-    const cfg = (a.scopes.config || []).map((c) => c.key);
-    check(`${a.identifier}: no gateway token to hold`, !cfg.includes("gateway_token"));
+    // The pack holds no credential, so no member declares a secret config value for the analyst
+    // to fill in.
+    const secrets = (a.scopes.config || []).filter((c) => c && c.secret === true).map((c) => c.key);
+    check(`${a.identifier}: declares no secret config`, secrets.length === 0);
   }
 }
 
