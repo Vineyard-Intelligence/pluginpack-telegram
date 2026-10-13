@@ -17,12 +17,6 @@
       "entry": "dist/pack.mjs"
     }
   },
-  "distribution": {
-    "kind": "git",
-    "repository": "https://github.com/Vineyard-Intelligence/pluginpack-telegram",
-    "ref": "v2.4.0",
-    "path": "plugins/telegram.manifest.json"
-  },
   "plugins": [
     {
       "identifier": "run.vineyard.plugins.telegram_search",

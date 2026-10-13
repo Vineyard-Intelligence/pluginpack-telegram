@@ -18,15 +18,11 @@
 // - Terminology: Telegram's canonical term is "participant" — the graph edges
 //   are participant_of / admin_of. Never introduce "member".
 
-// No gateway address and no gateway token live in this file any more.
-//
-// Both used to: the manifest pinned https://auxiliary.vineyard.run/telegram and the analyst pasted
-// a shared server secret into `gateway_token`. `ctx.service("telegram", path)` removes both. The
-// host owns the address — a pack cannot express a destination at all, which is what makes it safe
-// for the call to carry the analyst's own identity — and the auxiliary gateway swaps that identity
-// for tgpeek's bearer token only AFTER it has authenticated the analyst against api.vineyard.run.
-// So the token every analyst used to hold is now held by one server, and asking for it back would
-// be asking for a downgrade.
+// No gateway address and no gateway token live in this file. `ctx.service("telegram", path)`
+// names the service; the host owns the address — a pack cannot express a destination at all, which
+// is what makes it safe for the call to carry the analyst's own identity — and the auxiliary
+// gateway swaps that identity for tgpeek's bearer token only AFTER it has authenticated the analyst
+// against api.vineyard.run. The token is held by one server and never by an analyst.
 
 // ---- Telegram URL patterns -------------------------------------------------
 const TG_JOIN_RE = /^(?:https?:\/\/)?(?:t|telegram)\.(?:me|dog)\/(?:joinchat\/|\+)[A-Za-z0-9_-]+(?:[?&#].*)?$/i;
@@ -140,17 +136,16 @@ function peerData(ref) {
 // No address and no token. `ctx.service("telegram", …)` names a SERVICE; the host holds its URL
 // and attaches the analyst's own Vineyard credential, and the gateway in front of tgpeek swaps
 // that for tgpeek's bearer token after it has authenticated the analyst. So there is nothing here
-// for a pack to configure, and — more to the point — nothing for it to leak. The old
-// `gateway_token` asked every analyst to hold a shared server secret; that key is gone.
+// for a pack to configure, and — more to the point — nothing for it to leak.
 //
 /**
  * The per-run cap is a PARAMETER, not a setting.
  *
  * "How many to pull this time" is a decision the analyst makes at launch, and the pre-run form
- * already collects it — `telegram_search.limit` has always worked that way. It used to live in
- * `scopes.config`, and worse, ONE config block was pasted into both plugins: Posts advertised a
- * participants knob, Participants advertised a posts knob, and each spread the whole object onto
- * the wire, so a "Max posts" value rode along on /participants.
+ * already collects it, as it does for `telegram_search.limit`. A cap kept in `scopes.config`
+ * would be one block shared by both plugins: Posts would advertise a participants knob,
+ * Participants a posts knob, and spreading the whole object onto the wire would send a "Max posts"
+ * value along on /participants.
  *
  * The wire names really do differ — /posts reads `limit`, /participants reads `participants_limit`
  * — so the caller names the field it needs. That mismatch belongs here, not in the analyst's form,
@@ -199,13 +194,13 @@ async function postJson(ctx, path, body) {
 // The host renders a THROWN error in red on the run's row, with its message. A RETURNED summary is
 // always a green "succeeded", however grim the text — and when the run staged nothing, the toast
 // does not even show the summary, it shows "No changes". So catching every error, counting it, and
-// returning `Resolved 0 handle(s); 0 skipped, 3 error(s)` — which is what this pack used to do —
-// made a gateway that was down indistinguishable from three handles that simply have no Telegram
-// account. Both read as a quiet green success.
+// returning `Resolved 0 handle(s); 0 skipped, 3 error(s)` would make a gateway that is down
+// indistinguishable from three handles that simply have no Telegram account. Both would read as a
+// quiet green success.
 //
-// Per-item catching stays: one unreachable handle must not abandon the other forty-nine. What
-// changes is the ending — if NOTHING was collected and something failed, the run failed, and the
-// analyst gets the first real error message rather than a tally. A partial run still succeeds, but
+// Errors are caught per item: one unreachable handle must not abandon the other forty-nine. The
+// ending decides — if NOTHING was collected and something failed, the run failed, and the
+// analyst gets the first real error message rather than a tally. A partial run succeeds, but
 // carries that message in its summary instead of a number nobody can act on.
 function finish(summary, counts, firstError) {
   if (firstError && !counts.collected) throw new Error(firstError);
@@ -219,11 +214,11 @@ function noteError(counts, state, e) {
   state.firstError ??= e && e.message ? String(e.message) : String(e);
 }
 
-// A build with no `ctx.service` cannot reach the gateway at all. That is a broken install, not an
+// A host with no `ctx.service` cannot reach the gateway at all. That is a broken setup, not an
 // empty result, so it throws rather than returning a summary nobody would read as a problem.
 function requireService(ctx) {
   if (!ctx.service) {
-    throw new Error("this Vineyard build does not offer the Telegram service (ctx.service) — update the app");
+    throw new Error("this host does not offer the Telegram service (ctx.service)");
   }
 }
 
@@ -331,8 +326,7 @@ const searchPlugin = {
     icon: "search",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
-    distribution: { kind: "inline" },
-    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
+    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [],
       produces: [
@@ -394,8 +388,7 @@ const resolvePlugin = {
     icon: "user-search",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
-    distribution: { kind: "inline" },
-    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
+    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [
         { typepack: "run.vineyard.typepacks.infrastructure", category: "web", name: "url" },
@@ -531,8 +524,7 @@ const inviteLinkPlugin = {
     icon: "link",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
-    distribution: { kind: "inline" },
-    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
+    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [{ typepack: "run.vineyard.typepacks.infrastructure", category: "web", name: "url" }],
       produces: [
@@ -595,8 +587,7 @@ const postsPlugin = {
     icon: "list",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
-    distribution: { kind: "inline" },
-    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
+    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [
         { typepack: "run.vineyard.typepacks.infrastructure", category: "web", name: "url" },
@@ -686,8 +677,7 @@ const participantsPlugin = {
     icon: "users",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
-    distribution: { kind: "inline" },
-    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
+    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [{ typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "group" }],
       produces: [{ typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "user" }],
@@ -754,8 +744,7 @@ const phoneLookupPlugin = {
     icon: "phone",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
     license: "MIT",
-    distribution: { kind: "inline" },
-    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "inline" } },
+    platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [{ typepack: "run.vineyard.typepacks.identity", category: "identity", name: "phone_number" }],
       produces: [{ typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "user" }],
@@ -818,8 +807,7 @@ const packManifest = {
   name: "Telegram",
   // Keep in step with plugins/telegram.manifest.json. Unlike the generated packs, this file is
   // hand-authored source rather than esbuild output, so nothing regenerates this number when the
-  // manifest is bumped — it sat at 2.3.0 through the two telegram_resolve commits that shipped as
-  // 2.4.0, and the registry now fails the pack when the two disagree (verify_pinned.bundle_mismatch).
+  // manifest is bumped, and the registry refuses the pack when the two disagree.
   version: "2.4.3",
   description:
     "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
