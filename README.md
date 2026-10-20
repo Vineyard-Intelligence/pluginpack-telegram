@@ -1,6 +1,6 @@
 # pluginpack-telegram
 
-텔레그램 읽기 전용 정찰 VINEYARD 플러그인 팩 — tgpeek 게이트웨이를 통해 **가입 없이** 수집합니다.
+텔레그램 읽기 전용 정찰 VINEYARD 플러그인 팩 — Vineyard 텔레그램 게이트웨이를 통해 **가입 없이** 수집합니다.
 플러그인 6개가 게이트웨이 엔드포인트와 **1:1 대응**하므로, AI 에이전트와 분석가 모두 필요한 조작만 골라 실행할 수 있습니다.
 
 ## 플러그인 ↔ 엔드포인트
@@ -26,9 +26,9 @@ Telegram Phone Lookup (identity.phone_number 노드) ──▶ telegram.user + s
 - 모든 그래프 쓰기는 **스테이징** → analyst 리뷰 → 커밋
 - 노드 생성은 `key`(예: `telegram:telegram.channel:<id>`)로 중복 생성 방지
 - `username`은 대표 핸들 하나, `usernames`엔 활성 상태인 전체 핸들이 줄바꿈으로 들어감 —
-  텔레그램의 컬렉터블/복수 유저네임 계정은 대표 핸들 외에 여러 개를 더 가질 수 있음 (tgpeek 0.3.0+ 필요)
+  텔레그램의 컬렉터블/복수 유저네임 계정은 대표 핸들 외에 여러 개를 더 가질 수 있음
 - 비텔레그램 URL / 타입 불일치 입력은 **no-op** (아무것도 생성·수정하지 않음)
-- "login"은 플러그인 범위 밖 — 세션은 게이트웨이 운영자가 `tgpeek login`으로 관리
+- "login"은 플러그인 범위 밖 — 세션은 게이트웨이 운영자가 관리
 - 용어: 텔레그램 표준 용어인 **participant**만 사용 (그래프 엣지 `participant_of`/`admin_of`)
 - **Phone Lookup**: 번호가 미가입이거나 상대가 전화번호 조회를 숨겼으면 결과 없음(둘은 구분 불가). 게이트웨이가 1시간 캐시를 적용하고 동일 번호 동시 조회는 1회로 합칩니다.
 
@@ -68,8 +68,7 @@ await ctx.service("telegram", "resolve", { method: "POST", body: JSON.stringify(
 
 ## 서버 쪽 요구사항
 
-게이트웨이 세션은 운영자가 사전에 `tgpeek login`으로 만들어 둡니다(게이트웨이 자체는 재로그인하지
-않음). 게이트웨이가 공개 https 엔드포인트(`auxiliary.vineyard.run`)이므로 웹 앱과 데스크탑 앱
+게이트웨이 세션은 운영자가 사전에 만들어 둡니다(게이트웨이 자체는 재로그인하지 않음). 게이트웨이가 공개 https 엔드포인트(`auxiliary.vineyard.run`)이므로 웹 앱과 데스크탑 앱
 모두에서 동작합니다.
 
 ## 개발 테스트
@@ -89,5 +88,4 @@ node test-plugin.mjs
 
 ## 라이선스
 
-MIT. tgpeek(MIT)과 짝을 이룹니다. Telegram-X(GPLv3) 코드는 복사하지 않고
-호출 시퀀스(로직)만 참고했습니다.
+MIT. Telegram-X(GPLv3) 코드는 복사하지 않고 호출 시퀀스(로직)만 참고했습니다.

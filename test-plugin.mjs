@@ -37,12 +37,12 @@ function makeGraph(nodeById, createdNodes, createdEdges, updatedNodes) {
 //
 // There is no `auth` argument, and that is the point: the pack holds no credential. The
 // analyst's Vineyard token is attached by the host, and the auxiliary gateway swaps it for
-// tgpeek's own only after authenticating that analyst — so the strongest thing this harness can
+// its own upstream token only after authenticating that analyst — so the strongest thing this harness can
 // assert about credentials is that the pack sends NONE.
 // The pack knows no address. It names a SERVICE, and the host resolves it — so the harness asserts
 // that the name is "telegram" and nothing else, that the path is service-relative (no leading slash
 // to climb out of the mount with), and that the pack sends no credential of its own. The gateway
-// attaches tgpeek's token after authenticating the analyst.
+// attaches its own upstream token after authenticating the analyst.
 function makeService(respond) {
   return async (name, path, init) => {
     check(`service is "telegram", not ${name}`, name === "telegram");

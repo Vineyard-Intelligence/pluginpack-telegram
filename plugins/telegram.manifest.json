@@ -2,7 +2,7 @@
   "identifier": "run.vineyard.pluginpacks.telegram",
   "content_type": "vineyard:pluginpack",
   "name": "Telegram",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "description": "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
   "author": {
     "name": "VINEYARD",

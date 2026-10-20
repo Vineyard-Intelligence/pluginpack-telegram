@@ -1,4 +1,4 @@
-// Telegram — read-only Telegram reconnaissance via the tgpeek gateway.
+// Telegram — read-only Telegram reconnaissance via the Vineyard Telegram gateway.
 //
 // Five plugins mirror the gateway endpoints 1:1 so that both the AI agent and
 // the analyst can run exactly the operation they need:
@@ -21,7 +21,7 @@
 // No gateway address and no gateway token live in this file. `ctx.service("telegram", path)`
 // names the service; the host owns the address — a pack cannot express a destination at all, which
 // is what makes it safe for the call to carry the analyst's own identity — and the auxiliary
-// gateway swaps that identity for tgpeek's bearer token only AFTER it has authenticated the analyst
+// gateway swaps that identity for its own upstream token only AFTER it has authenticated the analyst
 // against api.vineyard.run. The token is held by one server and never by an analyst.
 
 // ---- Telegram URL patterns -------------------------------------------------
@@ -84,7 +84,7 @@ function chatData(type, info, source, url) {
   const data = {
     telegram_id: info.id != null ? info.id : undefined,
     username: info.username ?? undefined,
-    // tgpeek's `username` is the primary handle; `usernames` is the full active list, since
+    // The gateway's `username` is the primary handle; `usernames` is the full active list, since
     // Telegram's collectible/multi-username feature lets one entity hold several (see r3dbU7z /
     // durov-style accounts). One text field, one per line, matching social.media_urls' shape.
     usernames: Array.isArray(info.usernames) && info.usernames.length ? info.usernames.join("\n") : undefined,
@@ -134,8 +134,8 @@ function peerData(ref) {
 
 // ---- gateway plumbing ------------------------------------------------------
 // No address and no token. `ctx.service("telegram", …)` names a SERVICE; the host holds its URL
-// and attaches the analyst's own Vineyard credential, and the gateway in front of tgpeek swaps
-// that for tgpeek's bearer token after it has authenticated the analyst. So there is nothing here
+// and attaches the analyst's own Vineyard credential, and the gateway swaps that for its own
+// upstream token after it has authenticated the analyst. So there is nothing here
 // for a pack to configure, and — more to the point — nothing for it to leak.
 //
 /**
@@ -176,7 +176,7 @@ async function postJson(ctx, path, body) {
     body: JSON.stringify(body),
   });
   if (res.status === 401) {
-    // Not tgpeek refusing — the Vineyard session behind the call ended. Say which.
+    // Not the gateway refusing — the Vineyard session behind the call ended. Say which.
     throw new ServiceError("your session expired — sign in again and re-run", true);
   }
   if (res.status === 403) {
@@ -457,7 +457,7 @@ const resolvePlugin = {
       counts.processed++;
       try {
         // found:false means the gateway asked Telegram and the answer was no — a normal negative
-        // result, not a failure. Before this, tgpeek's /resolve answered a nonexistent handle
+        // result, not a failure. Before this, the gateway's /resolve answered a nonexistent handle
         // with the same HTTP 400 a malformed request gets, and postJson turned that into a thrown
         // ServiceError caught right below — so "checked and it has no account" and "the gateway
         // choked" both counted as counts.errors, and a run that only hit missing handles ended up
@@ -808,7 +808,7 @@ const packManifest = {
   // Keep in step with plugins/telegram.manifest.json. Unlike the generated packs, this file is
   // hand-authored source rather than esbuild output, so nothing regenerates this number when the
   // manifest is bumped, and the registry refuses the pack when the two disagree.
-  version: "2.4.3",
+  version: "2.4.4",
   description:
     "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
