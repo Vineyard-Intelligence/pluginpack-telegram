@@ -800,6 +800,72 @@ const phoneLookupPlugin = {
   },
 };
 
+// The pack's page: Markdown the marketplace drawer shows under `summary`. Lines joined with "\n"
+// rather than a template literal, so the Markdown's backticks and braces need no escaping.
+const PACK_PAGE = [
+  "Reads Telegram without joining any chat and without using a Telegram account of the analyst's own. Six plugins, one per endpoint of Vineyard's Telegram service, so each run does exactly one kind of read: search, resolve a handle, analyze an invite link, read posts, list participants, or look up a phone number.",
+  "",
+  "A typical flow: Telegram Search or Telegram Resolve produces channel and group nodes, and Telegram Posts and Telegram Participants expand them. Telegram Invite Link analyzes an invite URL; when Telegram grants temporary read access to it, Telegram Posts collects its posts.",
+  "",
+  "## Plugins",
+  "",
+  "### Telegram Search",
+  "- **Runs on:** a keyword typed in the Run dialog (no selection); `limit` 1–50, default 20.",
+  "- **Adds:** `telegram.user`, `telegram.channel` and `telegram.group` nodes for the results (Telegram id, usernames, title or display name, bot flag, profile URL). No edges.",
+  "",
+  "### Telegram Resolve",
+  "- **Runs on:** `web.url` nodes holding a t.me handle link (also `telegram.me`, `telegram.dog` and the `t.me/s/` preview form); `identity.handle` nodes whose value has the shape of a Telegram username; and existing `telegram.user`, `telegram.channel` and `telegram.group` nodes.",
+  "- **Adds:** for a URL, the chat or user node with a `links to` edge from the URL. For an `identity.handle`, the node with a `currently resolves to` edge: Telegram usernames can be released and claimed by an unrelated account, so the edge records who holds the handle now and does not assert that the two are one entity. An existing `telegram.*` node is updated in place with only the fields this lookup returned (about or bio, participant count, verified, bot and megagroup flags, all active usernames).",
+  "- **Limits:** invite links are skipped; Telegram Invite Link handles them. A handle with no account is counted as `not_found`, not as an error. A node without a username is looked up by its stored Telegram id, which works only when the service already knows that id. A node that resolves to a different kind than its own type is skipped.",
+  "",
+  "### Telegram Invite Link",
+  "- **Runs on:** `web.url` nodes holding an invite link (`t.me/+…`, `t.me/joinchat/…`, `tg://join?invite=…`).",
+  "- **Adds:** the `telegram.channel` or `telegram.group` node with a `links to` edge from the URL. Groups get `invite_hash`, and `peek` and `expires` are filled when Telegram grants temporary read access. It does not join and does not collect posts.",
+  "",
+  "### Telegram Posts",
+  "- **Runs on:** `telegram.channel` and `telegram.group` nodes (by username, else by Telegram id), and `web.url` invite links when temporary read access is granted; the chat node is then created with a `links to` edge.",
+  "- **Adds:** `telegram.post` nodes (message id, text, date, sender id, media kind, views, forwards, reply target, post URL) with `posted in` to the chat, and `replied to` between two posts when both are in the same result.",
+  "- **Limits:** `limit` caps posts per chat; blank collects all.",
+  "",
+  "### Telegram Participants",
+  "- **Runs on:** `telegram.group` nodes. Public supergroups only.",
+  "- **Adds:** a `telegram.user` node per participant with `participant of`, plus `admin of` for admins and the creator.",
+  "- **Limits:** `limit` caps participants per group; blank collects all.",
+  "",
+  "### Telegram Phone Lookup",
+  "- **Runs on:** `identity.phone_number` nodes.",
+  "- **Adds:** when the number has a Telegram account that allows lookup by phone number, the `telegram.user` node with a `same as` edge to the number.",
+  "- **Limits:** a number with no account and a number whose owner hides phone lookup both produce nothing, and the two cannot be told apart. The service caches each answer for one hour and merges simultaneous lookups of the same number into one.",
+  "",
+  "## Requirements",
+  "",
+  "- A signed-in Vineyard account that is permitted to use the Telegram service. The plugins call it by name (`scopes.services: [\"telegram\"]`): the app supplies the address and attaches the analyst's Vineyard credential. There is no API key, token or setting to enter.",
+  "- The Telegram type pack (`run.vineyard.typepacks.telegram`), which defines `telegram.user`, `telegram.channel`, `telegram.group` and `telegram.post`.",
+  "- Works in the web app and on desktop.",
+  "",
+  "## How runs end",
+  "",
+  "- `401`: the Vineyard session has expired. The run stops and asks to sign in again.",
+  "- `403`: the account is not permitted to use the Telegram service. The run stops.",
+  "- Nothing collected and at least one error: the run fails and shows the first error message.",
+  "- Partly collected: the run succeeds, and its summary ends with the first error message.",
+  "- Inputs that are not Telegram links, or not a node type the plugin takes, are skipped and nothing is changed.",
+  "",
+  "## What it contacts",
+  "",
+  "The pack makes no direct network requests and declares no network permission. Every request goes to Vineyard's Telegram service at `auxiliary.vineyard.run`, which sees the analyst's Vineyard identity and every search term, handle, link, chat and phone number sent. The service reads Telegram through a session its operator maintains; the analyst's own Telegram account, if there is one, is not used. Nothing is joined and nothing is posted: every request is a read.",
+  "",
+  "## Data and licences",
+  "",
+  "Results are Telegram content and account metadata as Telegram returns them at the time of the run. Nodes are keyed by their Telegram ids, so a second run reuses the same nodes instead of duplicating them. No code from Telegram-X (GPLv3) is copied; only its call sequence was used as a reference.",
+  "",
+  "## Source",
+  "",
+  "https://github.com/Vineyard-Intelligence/pluginpack-telegram (Apache-2.0)",
+  "",
+  "`dist/pack.mjs` is hand-written and is the source; there is no build step. `node test-plugin.mjs` runs the functional tests against a mocked graph and service, and checks that `plugins/telegram.manifest.json` declares the same scopes as the bundle.",
+].join("\n");
+
 // ---- pack -------------------------------------------------------------------
 const packManifest = {
   identifier: "run.vineyard.pluginpacks.telegram",
@@ -807,10 +873,12 @@ const packManifest = {
   name: "Telegram",
   // Keep in step with plugins/telegram.manifest.json. Unlike the generated packs, this file is
   // hand-authored source rather than esbuild output, so nothing regenerates this number when the
-  // manifest is bumped, and the registry refuses the pack when the two disagree.
-  version: "2.4.4",
-  description:
+  // manifest is bumped, and the registry refuses the pack when the two disagree. The same holds for
+  // `summary` and `description` (the pack's page), which the registry reads from the JSON copy.
+  version: "2.5.0",
+  summary:
     "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
+  description: PACK_PAGE,
   plugins: [searchPlugin.manifest, resolvePlugin.manifest, inviteLinkPlugin.manifest, postsPlugin.manifest, participantsPlugin.manifest, phoneLookupPlugin.manifest],
 };
 

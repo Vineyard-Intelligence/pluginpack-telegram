@@ -536,6 +536,9 @@ say("pack: " + pack.manifest.identifier + " | plugins: " + pack.plugins.map(p =>
 {
   const json = JSON.parse(readFileSync(new URL("./plugins/telegram.manifest.json", import.meta.url)));
   check("manifest versions agree", json.version === pack.manifest.version);
+  // Both copies are kept by hand (no generator), and the registry compares the JSON's card line
+  // with its catalog entry byte for byte, so a page edited in one copy only must fail here.
+  check("manifest summary and page agree", json.summary === pack.manifest.summary && json.description === pack.manifest.description);
   check("member count agrees", json.plugins.length === pack.plugins.length);
   for (let i = 0; i < json.plugins.length; i++) {
     const a = json.plugins[i];
