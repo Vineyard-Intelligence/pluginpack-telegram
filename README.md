@@ -88,4 +88,4 @@ node test-plugin.mjs
 
 ## 라이선스
 
-MIT. Telegram-X(GPLv3) 코드는 복사하지 않고 호출 시퀀스(로직)만 참고했습니다.
+Apache-2.0 (`LICENSE`). Telegram-X(GPLv3) 코드는 복사하지 않고 호출 시퀀스(로직)만 참고했습니다.

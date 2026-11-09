@@ -325,7 +325,7 @@ const searchPlugin = {
       "Searches Telegram by keyword from a query in the Run dialog (no selection) and creates telegram.user, telegram.channel and telegram.group nodes for the results (default 20, max 50).",
     icon: "search",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
-    license: "MIT",
+    license: "Apache-2.0",
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [],
@@ -387,7 +387,7 @@ const resolvePlugin = {
       "Resolves Telegram usernames to profiles (bio/about, participant count, flags). From selected web.url t.me handle links and identity.handle nodes it creates the telegram.user/channel/group node with a \"links to\" or \"currently resolves to\" edge respectively; selected telegram.user/channel/group nodes are updated in place. Invite links and non-Telegram inputs are skipped; a handle with no account counts as not_found, not an error.",
     icon: "user-search",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
-    license: "MIT",
+    license: "Apache-2.0",
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [
@@ -523,7 +523,7 @@ const inviteLinkPlugin = {
       "Analyzes each selected web.url invite link (t.me/+…, t.me/joinchat/…, tg://join) without joining and creates the telegram.channel or telegram.group node with a \"links to\" edge, filling invite_hash for groups and peek/expires when temporary read access is granted. Does not collect posts.",
     icon: "link",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
-    license: "MIT",
+    license: "Apache-2.0",
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [{ typepack: "run.vineyard.typepacks.infrastructure", category: "web", name: "url" }],
@@ -586,7 +586,7 @@ const postsPlugin = {
       "Collects posts without joining from selected telegram.channel/telegram.group nodes or web.url invite links (invite links only when temporary read access is granted; the chat node is created with a \"links to\" edge). Creates telegram.post nodes with \"posted in\" and \"replied to\" edges; the limit param caps posts per chat (blank = all).",
     icon: "list",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
-    license: "MIT",
+    license: "Apache-2.0",
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [
@@ -676,7 +676,7 @@ const participantsPlugin = {
       "Collects the participant list of each selected telegram.group without joining and creates telegram.user nodes with \"participant of\" edges, plus \"admin of\" for admins and the creator. Public supergroups only; the limit param caps participants per group (blank = all).",
     icon: "users",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
-    license: "MIT",
+    license: "Apache-2.0",
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [{ typepack: "run.vineyard.typepacks.telegram", category: "telegram", name: "group" }],
@@ -743,7 +743,7 @@ const phoneLookupPlugin = {
       "Looks up each selected identity.phone_number on Telegram and, when the number has an account that allows phone lookup, creates the telegram.user node with a \"same as\" edge to the number. Numbers with no account or with lookup hidden produce nothing.",
     icon: "phone",
     author: { name: "VINEYARD", url: "https://vineyard.run" },
-    license: "MIT",
+    license: "Apache-2.0",
     platforms: { primary: "web", web: { runtime: "sandbox-js", entry: "dist/pack.mjs" } },
     io: {
       consumes: [{ typepack: "run.vineyard.typepacks.identity", category: "identity", name: "phone_number" }],
@@ -875,7 +875,7 @@ const packManifest = {
   // hand-authored source rather than esbuild output, so nothing regenerates this number when the
   // manifest is bumped, and the registry refuses the pack when the two disagree. The same holds for
   // `summary` and `description` (the pack's page), which the registry reads from the JSON copy.
-  version: "2.5.0",
+  version: "2.5.1",
   summary:
     "Read-only Telegram collection without joining: keyword search, handle resolution, invite-link analysis, posts, participants and phone-number lookup, written as telegram.* nodes. Runs through Vineyard's Telegram service.",
   description: PACK_PAGE,
